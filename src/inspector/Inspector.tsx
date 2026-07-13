@@ -179,7 +179,8 @@ function InspectorBody({ clip, isVideo, name }: { clip: Clip; isVideo: boolean; 
               Reset
             </button>
           </div>
-          <SliderRow label="Scale" value={tf.scale} min={0.1} max={3} step={0.01} format={pct} onChange={(v) => setTf({ scale: v })} />
+          {/* 16:9 vers 9:16 en "cover" demande 3,16x : le max doit laisser de la marge au-dela. */}
+          <SliderRow label="Scale" value={tf.scale} min={0.1} max={4} step={0.01} format={pct} onChange={(v) => setTf({ scale: v })} />
           <SliderRow label="Position X" value={tf.x} min={0} max={1} step={0.01} format={pct} onChange={(v) => setTf({ x: v })} />
           <SliderRow label="Position Y" value={tf.y} min={0} max={1} step={0.01} format={pct} onChange={(v) => setTf({ y: v })} />
           <SliderRow label="Crop left" value={tf.crop.x} min={0} max={0.9} step={0.01} format={pct} onChange={(v) => setCrop({ x: v, w: Math.min(tf.crop.w, 1 - v) })} />
