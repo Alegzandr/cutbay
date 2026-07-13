@@ -9,46 +9,115 @@ import { ScheduledSource, scheduleProjectAudio, stopScheduled } from './audioMix
  * Non-blocking video frame cursor for one clip. Requests are coalesced:
  * if a decode is in flight, only the latest requested time is kept
  * (frames are dropped rather than queued — important on mobile).
+ *
+ * Two access modes:
+ * - sequential (playback): frames come from a `samples()` async iterator,
+ *   which decodes each packet once and pre-decodes ahead. Using `getSample`
+ *   here would re-decode from the previous keyframe for every single frame.
+ * - random (paused scrub / seek): plain `getSample`.
  */
 class FrameCursor {
   private sinkPromise: Promise<VideoSampleSink | null>;
   private current: VideoSample | null = null;
   private busy = false;
-  private pending: number | null = null;
+  private pending: { sourceSec: number; sequential: boolean } | null = null;
+  private disposed = false;
+
+  private iterator: AsyncGenerator<VideoSample, void, unknown> | null = null;
+  private iteratorDone = false;
+  private lookahead: VideoSample | null = null;
+  private lastSec = 0;
 
   constructor(asset: MediaAsset) {
     this.sinkPromise = createVideoSink(asset);
   }
 
-  request(sourceSec: number): void {
+  request(sourceSec: number, sequential: boolean): void {
     if (this.busy) {
-      this.pending = sourceSec;
+      this.pending = { sourceSec, sequential };
       return;
     }
     this.busy = true;
-    void this.fetch(sourceSec);
+    void this.fetch(Math.max(0, sourceSec), sequential);
   }
 
-  private async fetch(sourceSec: number): Promise<void> {
+  private async fetch(sourceSec: number, sequential: boolean): Promise<void> {
     try {
       const sink = await this.sinkPromise;
-      if (sink) {
-        const sample = await sink.getSample(Math.max(0, sourceSec));
-        if (sample) {
-          this.current?.close();
-          this.current = sample;
-        }
+      if (sink && !this.disposed) {
+        if (sequential) await this.fetchSequential(sink, sourceSec);
+        else await this.fetchSeek(sink, sourceSec);
       }
     } catch {
       // Decode errors surface as a stale frame; playback keeps going.
     } finally {
       this.busy = false;
-      if (this.pending !== null) {
+      if (this.disposed) {
+        this.releaseAll();
+      } else if (this.pending) {
         const next = this.pending;
         this.pending = null;
-        this.request(next);
+        this.request(next.sourceSec, next.sequential);
       }
     }
+  }
+
+  private async fetchSeek(sink: VideoSampleSink, sourceSec: number): Promise<void> {
+    await this.stopIterator();
+    const sample = await sink.getSample(sourceSec);
+    if (sample) {
+      this.current?.close();
+      this.current = sample;
+    }
+    this.lastSec = sourceSec;
+  }
+
+  private async fetchSequential(sink: VideoSampleSink, sourceSec: number): Promise<void> {
+    // A backward jump or a large forward jump is a seek: restart the iterator.
+    if (this.iterator && (sourceSec < this.lastSec || sourceSec > this.lastSec + 1)) {
+      await this.stopIterator();
+    }
+    if (!this.iterator) {
+      this.iterator = sink.samples(sourceSec);
+      this.iteratorDone = false;
+    }
+    // Advance until the next frame starts after sourceSec; the last one reached is shown.
+    while (!this.iteratorDone) {
+      if (!this.lookahead) {
+        const { value, done } = await this.iterator.next();
+        if (done || !value) {
+          this.iteratorDone = true;
+          break;
+        }
+        this.lookahead = value;
+      }
+      if (this.current && this.lookahead.timestamp > sourceSec) break;
+      this.current?.close();
+      this.current = this.lookahead;
+      this.lookahead = null;
+    }
+    this.lastSec = sourceSec;
+  }
+
+  private async stopIterator(): Promise<void> {
+    this.lookahead?.close();
+    this.lookahead = null;
+    const it = this.iterator;
+    this.iterator = null;
+    this.iteratorDone = false;
+    if (it) {
+      try {
+        await it.return(undefined);
+      } catch {
+        // Iterator cleanup failures are non-fatal.
+      }
+    }
+  }
+
+  private releaseAll(): void {
+    void this.stopIterator();
+    this.current?.close();
+    this.current = null;
   }
 
   get sample(): VideoSample | null {
@@ -56,8 +125,10 @@ class FrameCursor {
   }
 
   dispose(): void {
-    this.current?.close();
-    this.current = null;
+    this.disposed = true;
+    this.pending = null;
+    // If a fetch is in flight, it releases everything on completion.
+    if (!this.busy) this.releaseAll();
   }
 }
 
@@ -225,7 +296,7 @@ export class PlaybackEngine {
         cursor = new FrameCursor(asset);
         this.cursors.set(clip.id, cursor);
       }
-      cursor.request(timelineToSourceMs(clip, tMs) / 1000);
+      cursor.request(timelineToSourceMs(clip, tMs) / 1000, this.wasPlaying);
       const sample = cursor.sample;
       if (sample) drawClipSample(this.ctx, sample, clip, w, h, tMs);
     }
