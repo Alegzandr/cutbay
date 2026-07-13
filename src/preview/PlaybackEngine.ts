@@ -89,7 +89,12 @@ class FrameCursor {
           this.iteratorDone = true;
           break;
         }
-        this.lookahead = value;
+        // Take exclusive ownership: mediabunny's iterator can close a yielded
+        // sample again from closeSamples() when iteration starts past the last
+        // frame (lastSample is queued without being nulled). Cloning is cheap
+        // (VideoFrame refcount) and makes that stray close() a no-op.
+        this.lookahead = value.clone();
+        value.close();
       }
       if (this.current && this.lookahead.timestamp > sourceSec) break;
       this.current?.close();
@@ -266,7 +271,12 @@ export class PlaybackEngine {
       state.setCurrentTimeFromEngine(t);
     }
 
-    this.draw(state, t);
+    // A single bad frame must never kill the preview loop.
+    try {
+      this.draw(state, t);
+    } catch (err) {
+      console.warn('[preview] draw failed, frame dropped:', err);
+    }
     this.raf = requestAnimationFrame(this.tick);
   };
 
