@@ -23,6 +23,14 @@ export function registerInput(assetId: string, input: Input): void {
   inputs.set(assetId, input);
 }
 
+/** Release everything cached for an asset (decoder input, audio buffer, peaks). */
+export function disposeAssetResources(assetId: string): void {
+  inputs.get(assetId)?.dispose();
+  inputs.delete(assetId);
+  audioPromises.delete(assetId);
+  peaksPromises.delete(assetId);
+}
+
 export function getInput(asset: MediaAsset): Input {
   let input = inputs.get(asset.id);
   if (!input) {
@@ -83,4 +91,55 @@ async function decodeFullAudio(asset: MediaAsset): Promise<AudioBuffer | null> {
 /** Kick off background audio decoding right after import. */
 export function warmAudio(asset: MediaAsset): void {
   void getAudioBuffer(asset);
+}
+
+const peaksPromises = new Map<string, Promise<number[] | null>>();
+
+/** Peak resolution: 50 bins per second, enough for one bin per pixel at high zoom. */
+export function expectedPeakBins(durationMs: number): number {
+  return Math.round(Math.min(30000, Math.max(200, (durationMs / 1000) * 50)));
+}
+
+/** Normalized waveform peaks (0..1) across the asset's duration (memoized). */
+export function getPeaks(asset: MediaAsset): Promise<number[] | null> {
+  let promise = peaksPromises.get(asset.id);
+  if (!promise) {
+    promise = streamPeaks(asset).catch(() => null);
+    peaksPromises.set(asset.id, promise);
+  }
+  return promise;
+}
+
+/**
+ * Compute peaks by streaming decoded chunks — never materializes the full
+ * AudioBuffer, so hour-long footage works without a 100s-of-MB allocation.
+ */
+async function streamPeaks(asset: MediaAsset): Promise<number[] | null> {
+  if (!asset.hasAudio) return null;
+  const input = getInput(asset);
+  const track = await input.getPrimaryAudioTrack();
+  if (!track || !(await track.canDecode())) return null;
+
+  const sink = new AudioBufferSink(track);
+  const durationSec = asset.durationMs / 1000;
+  const bins = expectedPeakBins(asset.durationMs);
+  const out = new Array<number>(bins).fill(0);
+
+  for await (const wrapped of sink.buffers()) {
+    const data = wrapped.buffer.getChannelData(0);
+    const sr = wrapped.buffer.sampleRate;
+    // Sampling every few frames is plenty for a visual envelope.
+    const stride = Math.max(1, Math.floor(((durationSec / bins) * sr) / 32));
+    for (let j = 0; j < data.length; j += stride) {
+      const bin = Math.floor(((wrapped.timestamp + j / sr) / durationSec) * bins);
+      if (bin < 0 || bin >= bins) continue;
+      const v = Math.abs(data[j]);
+      if (v > out[bin]) out[bin] = v;
+    }
+  }
+
+  let max = 0;
+  for (const v of out) if (v > max) max = v;
+  if (max > 0) for (let i = 0; i < bins; i++) out[i] /= max;
+  return out;
 }

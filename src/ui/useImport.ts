@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useStore } from '../store/store';
-import { probeFile } from '../media/probe';
+import { ensureAssetVisuals, probeFile } from '../media/probe';
 
 /** Import a batch of files: probe metadata, register assets in the media library. */
 export function useImport(): (files: Iterable<File>) => Promise<void> {
@@ -12,6 +12,8 @@ export function useImport(): (files: Iterable<File>) => Promise<void> {
         try {
           const asset = await probeFile(file);
           addAsset(asset);
+          // Peaks and the full thumbnail strip arrive in the background.
+          ensureAssetVisuals(asset);
         } catch (err) {
           setError(err instanceof Error ? err.message : `Could not import ${file.name}`);
         }

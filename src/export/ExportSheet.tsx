@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckCircle2, Download, Loader2, X, XCircle } from 'lucide-react';
 import { useStore } from '../store/store';
+import { formatTime } from '../lib/time';
 import { presetsForAspect, ExportPreset } from './presets';
 import { startExport, downloadBlob, ExportHandle } from './exporter';
 
@@ -14,12 +15,15 @@ type Phase =
 export function ExportSheet() {
   const open = useStore((s) => s.exportOpen);
   const aspectRatio = useStore((s) => s.project.aspectRatio);
+  const region = useStore((s) => s.loopRegion);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [regionOnly, setRegionOnly] = useState(true);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const handleRef = useRef<ExportHandle | null>(null);
 
   const presets = presetsForAspect(aspectRatio);
   const selected = presets.find((p) => p.id === selectedId) ?? presets[0];
+  const exportedRegion = region && regionOnly ? region : null;
 
   const close = () => {
     handleRef.current?.cancel();
@@ -31,8 +35,12 @@ export function ExportSheet() {
   const run = (preset: ExportPreset) => {
     const { project, assets } = useStore.getState();
     setPhase({ kind: 'rendering', progress: 0 });
-    const handle = startExport(project, assets, preset, (progress) =>
-      setPhase((p) => (p.kind === 'rendering' ? { kind: 'rendering', progress } : p)),
+    const handle = startExport(
+      project,
+      assets,
+      preset,
+      (progress) => setPhase((p) => (p.kind === 'rendering' ? { kind: 'rendering', progress } : p)),
+      exportedRegion,
     );
     handleRef.current = handle;
     handle.promise
@@ -87,12 +95,29 @@ export function ExportSheet() {
                     </button>
                   ))}
                 </div>
+
+                {region && (
+                  <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-2.5 text-xs text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={regionOnly}
+                      onChange={(e) => setRegionOnly(e.target.checked)}
+                      className="h-3.5 w-3.5 accent-amber-400"
+                    />
+                    Render the selected region only —{' '}
+                    <span className="font-mono text-amber-200">
+                      {formatTime(region.startMs)} → {formatTime(region.endMs)}
+                    </span>
+                  </label>
+                )}
+
                 <button
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 py-3 text-sm font-semibold text-white active:bg-sky-600"
                   onClick={() => run(selected)}
                 >
                   <Download className="h-4 w-4" />
                   Export {selected.label}
+                  {exportedRegion ? ' (region)' : ''}
                 </button>
                 <p className="text-center text-[11px] text-zinc-600">
                   Everything renders on your device — nothing is uploaded.

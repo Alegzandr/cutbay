@@ -1,21 +1,11 @@
 import { useEffect } from 'react';
-import { useStore, getSelectedClip, projectDurationMs, clipEndMs } from '../store/store';
-import { clamp } from '../lib/time';
+import { useStore, getSelectedClip, projectDurationMs, clipEndMs, sortedMarkers } from '../store/store';
+import { zoomAtPlayhead, zoomToFit } from '../timeline/zoom';
 
-/** Zoom keeping the playhead at the same screen position (falls back to plain zoom). */
-function zoomAtPlayhead(factor: number) {
-  const s = useStore.getState();
-  const scroller = document.querySelector<HTMLElement>('.timeline-scroller');
-  const oldPxMs = s.pxPerSec / 1000;
-  s.setPxPerSec(s.pxPerSec * factor);
-  const newPxMs = useStore.getState().pxPerSec / 1000;
-  if (!scroller) return;
-  const pad = s.timelinePadLeft;
-  const anchorView = clamp(pad + s.currentTimeMs * oldPxMs - scroller.scrollLeft, 0, scroller.clientWidth);
-  scroller.scrollLeft = pad + s.currentTimeMs * newPxMs - anchorView;
-}
-
-/** Jump to the previous/next edit point (clip edges, origin, project end) — Vegas-style. */
+/**
+ * Jump to the previous/next edit point (clip edges, markers, region corners,
+ * origin, project end) — Vegas-style.
+ */
 function jumpToEdge(dir: -1 | 1) {
   const s = useStore.getState();
   const points = new Set<number>([0, projectDurationMs(s.project)]);
@@ -24,6 +14,11 @@ function jumpToEdge(dir: -1 | 1) {
       points.add(clip.timelineStartMs);
       points.add(clipEndMs(clip));
     }
+  }
+  for (const marker of sortedMarkers(s.project)) points.add(marker.timeMs);
+  if (s.loopRegion) {
+    points.add(s.loopRegion.startMs);
+    points.add(s.loopRegion.endMs);
   }
   const sorted = [...points].sort((a, b) => a - b);
   const cur = s.currentTimeMs;
@@ -48,6 +43,24 @@ function trimSelectedToPlayhead(edge: 'left' | 'right') {
 function stepBy(ms: number) {
   const s = useStore.getState();
   s.seek(s.currentTimeMs + ms);
+}
+
+/** Move the selected clip(s) by N frames (one undo step per press). */
+function nudgeSelected(frames: number) {
+  const s = useStore.getState();
+  if (s.selectedClipIds.length === 0) return;
+  const step = (1000 / s.project.fps) * frames;
+  const entries: { clipId: string; timelineStartMs: number }[] = [];
+  for (const track of s.project.tracks) {
+    for (const clip of track.clips) {
+      if (s.selectedClipIds.includes(clip.id)) {
+        entries.push({ clipId: clip.id, timelineStartMs: clip.timelineStartMs + step });
+      }
+    }
+  }
+  s.beginGesture();
+  s.moveClips(entries);
+  s.endGesture();
 }
 
 export function useEditorHotkeys() {
@@ -116,6 +129,13 @@ export function useEditorHotkeys() {
         return;
       }
 
+      // 1…9: jump to the n-th marker (Vegas-style cue keys).
+      if (/^[1-9]$/.test(e.key)) {
+        const marker = sortedMarkers(s.project)[Number(e.key) - 1];
+        if (marker) s.seek(marker.timeMs);
+        return;
+      }
+
       switch (e.key) {
         case 'ArrowLeft':
           e.preventDefault();
@@ -165,7 +185,13 @@ export function useEditorHotkeys() {
           return;
         case 'Delete':
         case 'Backspace':
-          if (s.selectedClipId) s.deleteClip(s.selectedClipId);
+          s.deleteClips(s.selectedClipIds, e.shiftKey);
+          return;
+        case ',':
+          nudgeSelected(-1);
+          return;
+        case '.':
+          nudgeSelected(1);
           return;
       }
 
@@ -173,14 +199,36 @@ export function useEditorHotkeys() {
         case 's':
           s.splitAtPlayhead();
           return;
+        case 't':
+          s.addTextClip();
+          return;
+        case 'i':
+          s.setRegionEdgeAtPlayhead('in');
+          return;
+        case 'o':
+          s.setRegionEdgeAtPlayhead('out');
+          return;
+        case 'q':
+          s.toggleLoopEnabled();
+          return;
+        case 'm':
+          s.addMarkerAtPlayhead();
+          return;
+        case 'z':
+          if (e.shiftKey) zoomToFit();
+          return;
         case 'j':
-          stepBy(-1000);
+          // Playing: halve the shuttle rate (slow review). Paused: step back 1s.
+          if (s.playing) s.setPlaybackRate(s.playbackRate / 2);
+          else stepBy(-1000);
           return;
         case 'k':
           if (s.playing) s.setPlaying(false);
           return;
         case 'l':
+          // First press plays at 1×, repeats double the shuttle rate (up to 8×).
           if (!s.playing) s.setPlaying(true);
+          else s.setPlaybackRate(s.playbackRate < 1 ? 1 : s.playbackRate * 2);
           return;
       }
     };

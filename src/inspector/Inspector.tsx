@@ -104,16 +104,81 @@ export function Inspector() {
           transition={{ type: 'spring', damping: 28, stiffness: 320 }}
           className="fixed inset-x-0 bottom-0 z-40 max-h-[55dvh] space-y-3 overflow-y-auto rounded-t-2xl border-t border-zinc-800 bg-zinc-900 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl shadow-black md:bottom-3 md:left-auto md:right-3 md:w-96 md:rounded-2xl md:border"
         >
-          <InspectorBody clip={clip} isVideo={asset?.kind === 'video'} name={asset?.file.name ?? ''} />
+          <InspectorBody
+            clip={clip}
+            isVideo={asset?.kind === 'video'}
+            hasAudio={asset?.hasAudio ?? false}
+            name={clip.text ? 'Text' : asset?.file.name ?? ''}
+          />
         </motion.div>
       )}
     </AnimatePresence>
   );
 }
 
-function InspectorBody({ clip, isVideo, name }: { clip: Clip; isVideo: boolean; name: string }) {
+function TextSection({ clip }: { clip: Clip }) {
+  const { updateClip, beginGesture, endGesture } = useStore.getState();
+  const text = clip.text!;
+  const setText = (patch: Partial<NonNullable<Clip['text']>>) =>
+    updateClip(clip.id, { text: { ...text, ...patch } });
+
+  return (
+    <div className="space-y-3">
+      <textarea
+        value={text.content}
+        rows={2}
+        placeholder="Your text…"
+        className="w-full resize-y rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-sky-500"
+        onFocus={beginGesture}
+        onBlur={endGesture}
+        onChange={(e) => setText({ content: e.target.value })}
+      />
+      <div className="flex items-center gap-3 text-xs text-zinc-400">
+        <span className="w-16 flex-none">Style</span>
+        <input
+          type="color"
+          value={text.color}
+          className="h-7 w-10 flex-none cursor-pointer rounded border border-zinc-700 bg-zinc-800"
+          title="Text color"
+          onFocus={beginGesture}
+          onBlur={endGesture}
+          onChange={(e) => setText({ color: e.target.value })}
+        />
+        <button
+          className={`rounded-md px-2 py-1 font-bold ${text.bold ? 'bg-sky-500/20 text-sky-300' : 'bg-zinc-800 text-zinc-300 active:bg-zinc-700'}`}
+          onClick={() => useStore.getState().updateClipCommitted(clip.id, { text: { ...text, bold: !text.bold } })}
+          title="Bold"
+        >
+          B
+        </button>
+      </div>
+      <SliderRow
+        label="Size"
+        value={text.sizeFrac}
+        min={0.02}
+        max={0.3}
+        step={0.005}
+        format={(v) => `${Math.round(v * 100)}%`}
+        onChange={(v) => setText({ sizeFrac: v })}
+      />
+    </div>
+  );
+}
+
+function InspectorBody({
+  clip,
+  isVideo,
+  hasAudio,
+  name,
+}: {
+  clip: Clip;
+  isVideo: boolean;
+  hasAudio: boolean;
+  name: string;
+}) {
   const { updateClip, deleteClip, selectClip, updateClipCommitted, setInspectorOpen } = useStore.getState();
   const coarse = useIsCoarsePointer();
+  const isText = clip.text != null;
   const tf: ClipTransform = clip.transform ?? DEFAULT_TRANSFORM;
   const setTf = (patch: Partial<ClipTransform>) =>
     updateClip(clip.id, { transform: { ...tf, ...patch } });
@@ -143,16 +208,46 @@ function InspectorBody({ clip, isVideo, name }: { clip: Clip; isVideo: boolean; 
         </button>
       </div>
 
-      <SliderRow
-        label="Volume"
-        value={clip.volume}
-        min={0}
-        max={2}
-        step={0.01}
-        format={pct}
-        onChange={(v) => updateClip(clip.id, { volume: v })}
-      />
-      <SpeedControl clip={clip} />
+      {isText && <TextSection clip={clip} />}
+
+      {hasAudio && (
+        <>
+          <SliderRow
+            label="Volume"
+            value={clip.volume}
+            min={0}
+            max={2}
+            step={0.01}
+            format={pct}
+            onChange={(v) => updateClip(clip.id, { volume: v })}
+          />
+          <SliderRow
+            label="Balance"
+            value={clip.pan ?? 0}
+            min={-1}
+            max={1}
+            step={0.01}
+            format={(v) => (v === 0 ? 'C' : v < 0 ? `L${Math.round(-v * 100)}` : `R${Math.round(v * 100)}`)}
+            onChange={(v) => updateClip(clip.id, { pan: v })}
+          />
+          <div className="flex items-center gap-3 text-xs text-zinc-400">
+            <span className="w-16 flex-none">Channels</span>
+            <button
+              className={`rounded-md px-2 py-1 ${!clip.mono ? 'bg-sky-500/20 text-sky-300' : 'bg-zinc-800 text-zinc-300 active:bg-zinc-700'}`}
+              onClick={() => updateClipCommitted(clip.id, { mono: false })}
+            >
+              Stereo
+            </button>
+            <button
+              className={`rounded-md px-2 py-1 ${clip.mono ? 'bg-sky-500/20 text-sky-300' : 'bg-zinc-800 text-zinc-300 active:bg-zinc-700'}`}
+              onClick={() => updateClipCommitted(clip.id, { mono: true })}
+            >
+              Mono
+            </button>
+          </div>
+        </>
+      )}
+      {!isText && <SpeedControl clip={clip} />}
       <SliderRow
         label="Fade in"
         value={clip.fadeInMs}
@@ -172,7 +267,7 @@ function InspectorBody({ clip, isVideo, name }: { clip: Clip; isVideo: boolean; 
         onChange={(v) => updateClip(clip.id, { fadeOutMs: v })}
       />
 
-      {isVideo && (
+      {(isVideo || isText) && (
         <div className="space-y-3 border-t border-zinc-800 pt-3">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
@@ -190,10 +285,14 @@ function InspectorBody({ clip, isVideo, name }: { clip: Clip; isVideo: boolean; 
           <SliderRow label="Scale" value={tf.scale} min={0.1} max={4} step={0.01} format={pct} onChange={(v) => setTf({ scale: v })} />
           <SliderRow label="Position X" value={tf.x} min={0} max={1} step={0.01} format={pct} onChange={(v) => setTf({ x: v })} />
           <SliderRow label="Position Y" value={tf.y} min={0} max={1} step={0.01} format={pct} onChange={(v) => setTf({ y: v })} />
-          <SliderRow label="Crop left" value={tf.crop.x} min={0} max={0.9} step={0.01} format={pct} onChange={(v) => setCrop({ x: v, w: Math.min(tf.crop.w, 1 - v) })} />
-          <SliderRow label="Crop top" value={tf.crop.y} min={0} max={0.9} step={0.01} format={pct} onChange={(v) => setCrop({ y: v, h: Math.min(tf.crop.h, 1 - v) })} />
-          <SliderRow label="Crop width" value={tf.crop.w} min={0.05} max={1} step={0.01} format={pct} onChange={(v) => setCrop({ w: Math.min(v, 1 - tf.crop.x) })} />
-          <SliderRow label="Crop height" value={tf.crop.h} min={0.05} max={1} step={0.01} format={pct} onChange={(v) => setCrop({ h: Math.min(v, 1 - tf.crop.y) })} />
+          {isVideo && (
+            <>
+              <SliderRow label="Crop left" value={tf.crop.x} min={0} max={0.9} step={0.01} format={pct} onChange={(v) => setCrop({ x: v, w: Math.min(tf.crop.w, 1 - v) })} />
+              <SliderRow label="Crop top" value={tf.crop.y} min={0} max={0.9} step={0.01} format={pct} onChange={(v) => setCrop({ y: v, h: Math.min(tf.crop.h, 1 - v) })} />
+              <SliderRow label="Crop width" value={tf.crop.w} min={0.05} max={1} step={0.01} format={pct} onChange={(v) => setCrop({ w: Math.min(v, 1 - tf.crop.x) })} />
+              <SliderRow label="Crop height" value={tf.crop.h} min={0.05} max={1} step={0.01} format={pct} onChange={(v) => setCrop({ h: Math.min(v, 1 - tf.crop.y) })} />
+            </>
+          )}
         </div>
       )}
     </>

@@ -1,15 +1,16 @@
 import { memo, useRef } from 'react';
-import { Music } from 'lucide-react';
-import { Clip, clipDurationMs } from '../types';
+import { Music, Type } from 'lucide-react';
+import { Clip, MediaAsset, clipDurationMs } from '../types';
 import { useStore } from '../store/store';
 import { collectSnapPoints, snapMove, snapTime } from './snapping';
 import { SNAP_THRESHOLD_PX, TRACK_HEIGHT_PX } from '../app/config';
 import { clamp } from '../lib/time';
 import { useIsCoarsePointer } from '../lib/device';
 import { snapTick } from '../lib/haptics';
+import { Waveform } from './Waveform';
 
 interface DragState {
-  mode: 'move' | 'trim-left' | 'trim-right';
+  mode: 'move' | 'trim-left' | 'trim-right' | 'fade-in' | 'fade-out';
   startX: number;
   startY: number;
   origStartMs: number;
@@ -19,6 +20,8 @@ interface DragState {
   moved: boolean;
   /** Last snapped-to position (ms), to fire one haptic tick per snap. */
   lastSnap: number | null;
+  /** Multi-selection drag: original start of every clip moving together. */
+  groupStarts: Map<string, number>;
 }
 
 interface Props {
@@ -26,9 +29,62 @@ interface Props {
   trackKind: 'video' | 'audio';
   selected: boolean;
   pxPerMs: number;
+  /** Overlap with the neighboring clips (crossfade windows), for the visuals. */
+  xfadeInMs?: number;
+  xfadeOutMs?: number;
 }
 
-export const ClipView = memo(function ClipView({ clip, trackKind, selected, pxPerMs }: Props) {
+/**
+ * Filmstrip: thumbnails tiled at the source aspect ratio (never stretched),
+ * each tile showing the frame closest to its position in the clip.
+ */
+const Filmstrip = memo(function Filmstrip({
+  asset,
+  clip,
+  widthPx,
+}: {
+  asset: MediaAsset;
+  clip: Clip;
+  widthPx: number;
+}) {
+  const aspect = asset.width && asset.height ? asset.width / asset.height : 16 / 9;
+  const tileW = Math.max(24, Math.round((TRACK_HEIGHT_PX - 8) * aspect));
+  const count = Math.min(1000, Math.max(1, Math.ceil(widthPx / tileW)));
+  const spanMs = clip.sourceOutMs - clip.sourceInMs;
+  const thumbs = asset.thumbnails;
+  return (
+    <div className="flex h-full w-full overflow-hidden">
+      {Array.from({ length: count }, (_, i) => {
+        const srcMs = clip.sourceInMs + ((i + 0.5) / count) * spanMs;
+        const idx = Math.min(
+          thumbs.length - 1,
+          Math.max(0, Math.round((srcMs / asset.durationMs) * (thumbs.length - 1))),
+        );
+        return (
+          <img
+            key={i}
+            src={thumbs[idx]}
+            className="h-full flex-none object-cover"
+            style={{ width: tileW }}
+            alt=""
+            draggable={false}
+            loading="lazy"
+            decoding="async"
+          />
+        );
+      })}
+    </div>
+  );
+});
+
+export const ClipView = memo(function ClipView({
+  clip,
+  trackKind,
+  selected,
+  pxPerMs,
+  xfadeInMs = 0,
+  xfadeOutMs = 0,
+}: Props) {
   const asset = useStore((s) => s.assets[clip.assetId]);
   const padLeft = useStore((s) => s.timelinePadLeft);
   const coarse = useIsCoarsePointer();
@@ -47,10 +103,25 @@ export const ClipView = memo(function ClipView({ clip, trackKind, selected, pxPe
     // (via onClick), and only a selected clip can be dragged.
     if (coarse && !selected) return;
     e.stopPropagation();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const state = useStore.getState();
-    state.selectClip(clip.id);
+    // Ctrl/Cmd+click (desktop): toggle membership in the multi-selection, no drag.
+    if (!coarse && (e.ctrlKey || e.metaKey) && mode === 'move') {
+      state.toggleSelectClip(clip.id);
+      return;
+    }
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    // Dragging a clip that belongs to a multi-selection moves the whole group.
+    const multi =
+      mode === 'move' && state.selectedClipIds.length > 1 && state.selectedClipIds.includes(clip.id);
+    if (!multi) state.selectClip(clip.id);
     state.beginGesture();
+    const groupIds = multi ? state.selectedClipIds : [clip.id];
+    const groupStarts = new Map<string, number>();
+    for (const t of state.project.tracks) {
+      for (const c of t.clips) {
+        if (groupIds.includes(c.id)) groupStarts.set(c.id, c.timelineStartMs);
+      }
+    }
     drag.current = {
       mode,
       startX: e.clientX,
@@ -58,9 +129,10 @@ export const ClipView = memo(function ClipView({ clip, trackKind, selected, pxPe
       origStartMs: clip.timelineStartMs,
       durMs,
       origTrackIndex: state.project.tracks.findIndex((t) => t.id === clip.trackId),
-      points: collectSnapPoints(state.project, clip.id, state.currentTimeMs),
+      points: collectSnapPoints(state.project, groupIds, state.currentTimeMs, state.loopRegion),
       moved: false,
       lastSnap: null,
+      groupStarts,
     };
   };
 
@@ -74,7 +146,8 @@ export const ClipView = memo(function ClipView({ clip, trackKind, selected, pxPe
 
     const state = useStore.getState();
     const pxMs = state.pxPerSec / 1000;
-    const snapThresholdMs = SNAP_THRESHOLD_PX / pxMs;
+    // Alt disables snapping (standard NLE behavior for fine placement).
+    const snapThresholdMs = e.altKey ? 0 : SNAP_THRESHOLD_PX / pxMs;
 
     if (d.mode === 'move') {
       const raw = d.origStartMs + dx / pxMs;
@@ -83,13 +156,35 @@ export const ClipView = memo(function ClipView({ clip, trackKind, selected, pxPe
       d.lastSnap = proposed !== raw ? proposed : null;
       proposed = Math.max(0, proposed);
 
-      let targetTrackId: string | undefined;
-      const tracks = state.project.tracks;
-      const deltaRows = Math.round(dy / TRACK_HEIGHT_PX);
-      const targetIdx = clamp(d.origTrackIndex + deltaRows, 0, tracks.length - 1);
-      if (tracks[targetIdx]?.kind === trackKind) targetTrackId = tracks[targetIdx].id;
+      if (d.groupStarts.size > 1) {
+        // Group drag: same delta for everyone, clamped so no clip crosses t=0.
+        let delta = proposed - d.origStartMs;
+        const minStart = Math.min(...d.groupStarts.values());
+        delta = Math.max(delta, -minStart);
+        state.moveClips(
+          [...d.groupStarts].map(([clipId, orig]) => ({ clipId, timelineStartMs: orig + delta })),
+        );
+      } else {
+        let targetTrackId: string | undefined;
+        const tracks = state.project.tracks;
+        const deltaRows = Math.round(dy / TRACK_HEIGHT_PX);
+        const targetIdx = clamp(d.origTrackIndex + deltaRows, 0, tracks.length - 1);
+        if (tracks[targetIdx]?.kind === trackKind) targetTrackId = tracks[targetIdx].id;
 
-      state.moveClip(clip.id, proposed, targetTrackId);
+        state.moveClip(clip.id, proposed, targetTrackId);
+      }
+    } else if (d.mode === 'fade-in' || d.mode === 'fade-out') {
+      // Fade handles: drag inward from a clip edge to fade from/to black (and silence).
+      const rect = contentOf(e.currentTarget as HTMLElement).getBoundingClientRect();
+      const contentX = e.clientX - rect.left;
+      const tMs = (contentX - state.timelinePadLeft) / pxMs;
+      if (d.mode === 'fade-in') {
+        const v = Math.round(clamp(tMs - d.origStartMs, 0, d.durMs) / 10) * 10;
+        state.updateClip(clip.id, { fadeInMs: v });
+      } else {
+        const v = Math.round(clamp(d.origStartMs + d.durMs - tMs, 0, d.durMs) / 10) * 10;
+        state.updateClip(clip.id, { fadeOutMs: v });
+      }
     } else {
       const rect = contentOf(e.currentTarget as HTMLElement).getBoundingClientRect();
       const contentX = e.clientX - rect.left;
@@ -128,16 +223,34 @@ export const ClipView = memo(function ClipView({ clip, trackKind, selected, pxPe
         if (coarse && !selected) useStore.getState().selectClip(clip.id);
       }}
     >
-      {isVideo && asset?.thumbnails.length ? (
-        <div className="pointer-events-none flex h-full w-full">
-          {asset.thumbnails.map((src, i) => (
-            <img key={i} src={src} className="h-full min-w-0 flex-1 object-cover" alt="" draggable={false} />
-          ))}
+      {clip.text ? (
+        <div className="pointer-events-none flex h-full w-full items-center gap-1 bg-gradient-to-b from-violet-900/60 to-violet-950 px-1.5">
+          <Type className="h-3 w-3 flex-none text-violet-300" />
+          <span className="truncate text-[11px] font-medium text-violet-100">
+            {clip.text.content.split('\n')[0] || 'Texte'}
+          </span>
+        </div>
+      ) : isVideo && asset?.thumbnails.length ? (
+        <div className="pointer-events-none h-full w-full">
+          <Filmstrip asset={asset} clip={clip} widthPx={width} />
+          {/* Audio envelope under the thumbnails — cutting to sound needs to be visual. */}
+          {asset.peaks && (
+            <div className="absolute inset-x-0 bottom-0 h-1/3 bg-black/40">
+              <Waveform asset={asset} clip={clip} widthPx={width} color="rgba(255,255,255,0.85)" />
+            </div>
+          )}
         </div>
       ) : (
-        <div className="pointer-events-none flex h-full items-center gap-1.5 bg-gradient-to-b from-emerald-900/60 to-emerald-950 px-2">
-          <Music className="h-3.5 w-3.5 flex-none text-emerald-300" />
-          <span className="truncate text-[10px] text-emerald-100">{asset?.file.name}</span>
+        <div className="pointer-events-none relative h-full w-full bg-gradient-to-b from-emerald-900/60 to-emerald-950">
+          {asset?.peaks && (
+            <div className="absolute inset-0">
+              <Waveform asset={asset} clip={clip} widthPx={width} color="rgba(110,231,183,0.65)" />
+            </div>
+          )}
+          <div className="absolute left-0 top-0 flex max-w-full items-center gap-1 px-1.5 py-0.5">
+            <Music className="h-3 w-3 flex-none text-emerald-300" />
+            <span className="truncate text-[10px] text-emerald-100">{asset?.file.name}</span>
+          </div>
         </div>
       )}
 
@@ -190,6 +303,44 @@ export const ClipView = memo(function ClipView({ clip, trackKind, selected, pxPe
           className="pointer-events-none absolute inset-y-0 right-0 bg-gradient-to-l from-black/70 to-transparent"
           style={{ width: clip.fadeOutMs * pxPerMs }}
         />
+      )}
+
+      {/* Crossfade regions (overlap with a neighboring clip) */}
+      {xfadeInMs > 0 && (
+        <div
+          className="pointer-events-none absolute inset-y-0 left-0 border-r border-white/30 bg-gradient-to-r from-white/20 to-transparent"
+          style={{ width: xfadeInMs * pxPerMs }}
+        />
+      )}
+      {xfadeOutMs > 0 && (
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 border-l border-white/30 bg-gradient-to-l from-white/20 to-transparent"
+          style={{ width: xfadeOutMs * pxPerMs }}
+        />
+      )}
+
+      {/* Fade handles: drag from the clip's top corners to fade from/to black */}
+      {selected && (
+        <>
+          <div
+            className={`absolute top-0 z-10 -translate-x-1/2 cursor-ew-resize touch-none rounded-full border border-zinc-900 bg-amber-300 shadow ${coarse ? 'h-4 w-4' : 'h-3 w-3'}`}
+            style={{ left: clamp(clip.fadeInMs * pxPerMs, 6, Math.max(6, width / 2)) }}
+            title="Fade in"
+            onPointerDown={(e) => beginDrag(e, 'fade-in')}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+          />
+          <div
+            className={`absolute top-0 z-10 -translate-x-1/2 cursor-ew-resize touch-none rounded-full border border-zinc-900 bg-amber-300 shadow ${coarse ? 'h-4 w-4' : 'h-3 w-3'}`}
+            style={{ left: clamp(width - clip.fadeOutMs * pxPerMs, Math.min(width - 6, width / 2), width - 6) }}
+            title="Fade out"
+            onPointerDown={(e) => beginDrag(e, 'fade-out')}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+          />
+        </>
       )}
     </div>
   );

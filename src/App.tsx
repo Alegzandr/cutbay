@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { UploadCloud } from 'lucide-react';
 import { useStore } from './store/store';
+import { initPersistence } from './lib/persistence';
 import { TopBar } from './ui/TopBar';
 import { Transport } from './ui/Transport';
 import { Toast } from './ui/Toast';
@@ -23,6 +24,11 @@ export default function App() {
 
   useEditorHotkeys();
 
+  // Restore the last session from IndexedDB and keep it saved from then on.
+  useEffect(() => {
+    void initPersistence();
+  }, []);
+
   if (!supported) return <UnsupportedScreen />;
 
   return (
@@ -30,7 +36,8 @@ export default function App() {
       className="flex h-dvh flex-col overflow-hidden bg-zinc-950 text-zinc-100"
       onDragOver={(e) => {
         e.preventDefault();
-        setDragging(true);
+        // Internal asset drags (media library → timeline) must not trigger the import overlay.
+        if (e.dataTransfer.types.includes('Files')) setDragging(true);
       }}
       onDragLeave={(e) => {
         if (e.currentTarget === e.target) setDragging(false);

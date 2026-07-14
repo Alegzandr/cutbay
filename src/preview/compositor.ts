@@ -1,11 +1,39 @@
 import type { VideoSample } from 'mediabunny';
-import { Clip, DEFAULT_TRANSFORM, clipFadeGainAt } from '../types';
+import { Clip, ClipText, DEFAULT_TRANSFORM, clipEnvelopeGainAt } from '../types';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
+export interface DestRect {
+  dx: number;
+  dy: number;
+  dw: number;
+  dh: number;
+}
+
 /**
- * Draw a clip's video sample onto the output canvas, applying crop,
- * position, scale and fade opacity. Shared by preview and export.
+ * Destination rectangle of a clip in the output, from the source dimensions
+ * and the clip transform (crop → "contain" fit → user scale, centered on x/y).
+ * Shared by drawing, preview hit-testing and the selection overlay.
+ */
+export function clipDestRect(clip: Clip, srcW: number, srcH: number, outW: number, outH: number): DestRect {
+  const t = clip.transform ?? DEFAULT_TRANSFORM;
+  const cropW = Math.max(1, t.crop.w * srcW);
+  const cropH = Math.max(1, t.crop.h * srcH);
+  const fit = Math.min(outW / cropW, outH / cropH) * t.scale;
+  const dw = cropW * fit;
+  const dh = cropH * fit;
+  return { dx: t.x * outW - dw / 2, dy: t.y * outH - dh / 2, dw, dh };
+}
+
+/**
+ * Draw a clip's video sample onto the output canvas, applying crop, position,
+ * scale and fade opacity. Shared by preview and export.
+ *
+ * `alphaMul` is the track opacity; `xfadeInMs` is the overlap with the
+ * previous clip on the track. Only the ramp-IN is applied visually: the
+ * incoming clip composites over the outgoing one with rising alpha, which
+ * gives a true cross-dissolve without the mid-fade dip to black that two
+ * symmetrical alpha ramps would produce.
  */
 export function drawClipSample(
   ctx: Ctx2D,
@@ -14,8 +42,10 @@ export function drawClipSample(
   outW: number,
   outH: number,
   timelineMs: number,
+  alphaMul = 1,
+  xfadeInMs = 0,
 ): void {
-  const alpha = clipFadeGainAt(clip, timelineMs);
+  const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul;
   if (alpha <= 0) return;
 
   const t = clip.transform ?? DEFAULT_TRANSFORM;
@@ -25,27 +55,95 @@ export function drawClipSample(
   const sy = t.crop.y * sh;
   const cropW = Math.max(1, t.crop.w * sw);
   const cropH = Math.max(1, t.crop.h * sh);
-
-  // "Contain" fit of the cropped region, then user scale, centered on (x, y).
-  const fit = Math.min(outW / cropW, outH / cropH) * t.scale;
-  const dw = cropW * fit;
-  const dh = cropH * fit;
-  const dx = t.x * outW - dw / 2;
-  const dy = t.y * outH - dh / 2;
+  const { dx, dy, dw, dh } = clipDestRect(clip, sw, sh, outW, outH);
 
   ctx.globalAlpha = alpha;
   sample.draw(ctx, sx, sy, cropW, cropH, dx, dy, dw, dh);
   ctx.globalAlpha = 1;
 }
 
-/** Among a track's clips, the one shown at time t (latest-starting clip covering t). */
-export function topClipAt(clips: Clip[], tMs: number): Clip | null {
-  let best: Clip | null = null;
+/** Font shorthand for a text clip at a given output height and clip scale. */
+function textFont(text: ClipText, outH: number, scale: number): { font: string; px: number } {
+  const px = Math.max(1, text.sizeFrac * outH * scale);
+  return { font: `${text.bold ? '700' : '400'} ${px}px system-ui, -apple-system, sans-serif`, px };
+}
+
+/**
+ * Draw a generated text clip. Same fade/crossfade semantics as media clips,
+ * position and scale come from the clip transform (crop is ignored).
+ */
+export function drawTextClip(
+  ctx: Ctx2D,
+  clip: Clip,
+  outW: number,
+  outH: number,
+  timelineMs: number,
+  alphaMul = 1,
+  xfadeInMs = 0,
+): void {
+  const text = clip.text;
+  if (!text || !text.content) return;
+  const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul;
+  if (alpha <= 0) return;
+
+  const t = clip.transform ?? DEFAULT_TRANSFORM;
+  const { font, px } = textFont(text, outH, t.scale);
+  const lines = text.content.split('\n');
+  const lineHeight = px * 1.2;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = font;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Soft shadow so light text stays readable over light footage.
+  ctx.shadowColor = 'rgba(0,0,0,0.55)';
+  ctx.shadowBlur = px * 0.12;
+  ctx.shadowOffsetY = px * 0.03;
+  ctx.fillStyle = text.color;
+  const cx = t.x * outW;
+  const cy = t.y * outH;
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], cx, cy + (i - (lines.length - 1) / 2) * lineHeight);
+  }
+  ctx.restore();
+}
+
+let measureCtx: Ctx2D | null = null;
+
+/**
+ * Bounding box of a text clip in output coordinates (hit-testing and the
+ * preview selection overlay). Uses a shared 1×1 measuring context.
+ */
+export function textClipRect(clip: Clip, outW: number, outH: number): DestRect {
+  const text = clip.text;
+  const t = clip.transform ?? DEFAULT_TRANSFORM;
+  if (!text || !text.content) return { dx: t.x * outW, dy: t.y * outH, dw: 0, dh: 0 };
+  if (!measureCtx) {
+    measureCtx =
+      typeof OffscreenCanvas !== 'undefined'
+        ? new OffscreenCanvas(1, 1).getContext('2d')
+        : (document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D);
+  }
+  const { font, px } = textFont(text, outH, t.scale);
+  const lines = text.content.split('\n');
+  measureCtx!.font = font;
+  let dw = 0;
+  for (const line of lines) dw = Math.max(dw, measureCtx!.measureText(line).width);
+  const dh = lines.length * px * 1.2;
+  return { dx: t.x * outW - dw / 2, dy: t.y * outH - dh / 2, dw, dh };
+}
+
+/**
+ * Clips of a track visible at time t, in draw order (earliest start first —
+ * the later clip composites over the earlier one during a crossfade).
+ * A legal layout has at most two (pairwise overlaps only).
+ */
+export function clipsAt(clips: Clip[], tMs: number): Clip[] {
+  const visible: Clip[] = [];
   for (const clip of clips) {
     const dur = (clip.sourceOutMs - clip.sourceInMs) / clip.speed;
-    if (tMs >= clip.timelineStartMs && tMs < clip.timelineStartMs + dur) {
-      if (!best || clip.timelineStartMs >= best.timelineStartMs) best = clip;
-    }
+    if (tMs >= clip.timelineStartMs && tMs < clip.timelineStartMs + dur) visible.push(clip);
   }
-  return best;
+  return visible.sort((a, b) => a.timelineStartMs - b.timelineStartMs);
 }

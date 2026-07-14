@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { Clapperboard, Download, FilePlus, Redo2, RectangleHorizontal, RectangleVertical, Undo2 } from 'lucide-react';
+import { Clapperboard, Download, FilePlus, FileX2, Redo2, RectangleHorizontal, RectangleVertical, Type, Undo2 } from 'lucide-react';
 import { APP_NAME } from '../app/config';
 import { useStore } from '../store/store';
 import { useImport } from './useImport';
@@ -8,7 +8,7 @@ export function TopBar() {
   const aspectRatio = useStore((s) => s.project.aspectRatio);
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
-  const { setAspectRatio, undo, redo, setExportOpen } = useStore.getState();
+  const { setAspectRatio, undo, redo, setExportOpen, resetProject, addTextClip } = useStore.getState();
   const importFiles = useImport();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -43,6 +43,18 @@ export function TopBar() {
       <div className="mx-auto" />
 
       <button
+        className="rounded-lg p-2 text-zinc-400 active:bg-zinc-800"
+        onClick={() => {
+          if (window.confirm('Start a new project? The current one will be discarded.')) {
+            resetProject();
+          }
+        }}
+        title="New project (discard everything)"
+      >
+        <FileX2 className="h-4 w-4" />
+      </button>
+
+      <button
         className="rounded-lg p-2 text-zinc-400 enabled:active:bg-zinc-800 disabled:opacity-30"
         disabled={!canUndo}
         onClick={undo}
@@ -70,6 +82,14 @@ export function TopBar() {
           e.target.value = '';
         }}
       />
+      <button
+        className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-200 active:bg-zinc-800"
+        onClick={addTextClip}
+        title="Add a text clip at the playhead (T)"
+      >
+        <Type className="h-4 w-4" />
+        <span className="hidden sm:inline">Text</span>
+      </button>
       <button
         className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-200 active:bg-zinc-800"
         onClick={() => fileInputRef.current?.click()}

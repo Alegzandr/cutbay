@@ -1,11 +1,14 @@
 import { CanvasSink } from 'mediabunny';
 import { MediaAsset } from '../types';
 import { uid } from '../lib/id';
-import { createInput, registerInput, warmAudio } from './mediaCache';
+import { createInput, expectedPeakBins, getInput, getPeaks, registerInput, warmAudio } from './mediaCache';
+import { useStore } from '../store/store';
 
 /**
- * Probe an imported file: metadata + thumbnails.
+ * Probe an imported file: metadata + a first quick thumbnail.
  * Throws an Error (displayable message) if the file cannot be read.
+ * The full thumbnail strip and audio peaks are filled in later by
+ * ensureAssetVisuals() so importing stays fast.
  */
 export async function probeFile(file: File): Promise<MediaAsset> {
   const input = createInput(file);
@@ -46,7 +49,10 @@ export async function probeFile(file: File): Promise<MediaAsset> {
 
   if (videoTrack) {
     try {
-      asset.thumbnails = await extractThumbnails(videoTrack, durationMs / 1000);
+      // One quick frame so the asset card shows something right away.
+      asset.thumbnails = await extractThumbnails(videoTrack, asset, [
+        Math.min(1, durationMs / 2000),
+      ]);
     } catch {
       // Thumbnails are cosmetic: keep going without them.
     }
@@ -56,23 +62,64 @@ export async function probeFile(file: File): Promise<MediaAsset> {
   return asset;
 }
 
+/** Thumbnails to cover an asset's duration (filmstrip tiles pick the closest one). */
+export function targetThumbnailCount(durationMs: number): number {
+  return Math.min(32, Math.max(4, Math.ceil(durationMs / 10_000)));
+}
+
+/**
+ * Kick off whatever visual data the asset is missing (audio peaks, full
+ * thumbnail strip) and push the results into the store when ready.
+ * Called after import and after an IndexedDB restore.
+ */
+export function ensureAssetVisuals(asset: MediaAsset): void {
+  if (asset.hasAudio && (asset.peaks?.length ?? 0) < expectedPeakBins(asset.durationMs)) {
+    void getPeaks(asset).then((peaks) => {
+      if (peaks) useStore.getState().setAssetPeaks(asset.id, peaks);
+    });
+  }
+  if (asset.kind === 'video' && asset.thumbnails.length < targetThumbnailCount(asset.durationMs)) {
+    void extractAssetThumbnails(asset).then((thumbs) => {
+      if (thumbs.length) useStore.getState().setAssetThumbnails(asset.id, thumbs);
+    });
+  }
+}
+
+async function extractAssetThumbnails(asset: MediaAsset): Promise<string[]> {
+  try {
+    const track = await getInput(asset).getPrimaryVideoTrack();
+    if (!track) return [];
+    const count = targetThumbnailCount(asset.durationMs);
+    const timestamps = Array.from(
+      { length: count },
+      (_, i) => ((asset.durationMs / 1000) * (i + 0.5)) / count,
+    );
+    return await extractThumbnails(track, asset, timestamps);
+  } catch {
+    return [];
+  }
+}
+
 async function extractThumbnails(
   videoTrack: ConstructorParameters<typeof CanvasSink>[0],
-  durationSec: number,
+  asset: Pick<MediaAsset, 'width' | 'height'>,
+  timestamps: number[],
 ): Promise<string[]> {
-  const count = Math.min(8, Math.max(1, Math.ceil(durationSec / 4)));
-  const sink = new CanvasSink(videoTrack, { width: 128, fit: 'cover', height: 72 });
-  const timestamps = Array.from({ length: count }, (_, i) => (durationSec * (i + 0.5)) / count);
+  // Tiles are drawn at the source aspect ratio, so bake it into the thumbnail.
+  const aspect = asset.width && asset.height ? asset.width / asset.height : 16 / 9;
+  const w = 160;
+  const h = Math.max(16, Math.round(w / aspect));
+  const sink = new CanvasSink(videoTrack, { width: w, height: h, fit: 'cover' });
 
   const out: string[] = [];
   const scratch = document.createElement('canvas');
-  scratch.width = 128;
-  scratch.height = 72;
+  scratch.width = w;
+  scratch.height = h;
   const ctx = scratch.getContext('2d')!;
 
   for await (const wrapped of sink.canvasesAtTimestamps(timestamps)) {
     if (!wrapped) continue;
-    ctx.drawImage(wrapped.canvas as CanvasImageSource, 0, 0, 128, 72);
+    ctx.drawImage(wrapped.canvas as CanvasImageSource, 0, 0, w, h);
     out.push(scratch.toDataURL('image/jpeg', 0.6));
   }
   return out;

@@ -2,6 +2,7 @@ import { Film, FolderOpen, Music, Plus, Trash2 } from 'lucide-react';
 import { useStore } from '../store/store';
 import { MediaAsset } from '../types';
 import { formatTimeShort } from '../lib/time';
+import { ASSET_DRAG_MIME } from '../app/config';
 
 /**
  * Source explorer: every imported file lands here. From here assets are
@@ -40,7 +41,15 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
   const isVideo = asset.kind === 'video';
 
   return (
-    <div className="group overflow-hidden rounded-md border border-zinc-800 bg-zinc-900">
+    <div
+      className="group overflow-hidden rounded-md border border-zinc-800 bg-zinc-900"
+      draggable
+      onDragStart={(e) => {
+        // Desktop: drag the asset straight onto a timeline position.
+        e.dataTransfer.setData(ASSET_DRAG_MIME, asset.id);
+        e.dataTransfer.effectAllowed = 'copy';
+      }}
+    >
       <div className="relative aspect-video w-full overflow-hidden bg-zinc-950">
         {isVideo && asset.thumbnails.length ? (
           <img src={asset.thumbnails[0]} className="h-full w-full object-cover" alt="" draggable={false} />

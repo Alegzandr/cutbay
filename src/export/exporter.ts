@@ -1,4 +1,4 @@
-import { MediaAsset, Project, clipEndMs, projectDurationMs } from '../types';
+import { LoopRegion, MediaAsset, Project, clipEndMs, projectDurationMs } from '../types';
 import { AUDIO_SAMPLE_RATE } from '../app/config';
 import { getAudioBuffer } from '../media/mediaCache';
 import { scheduleProjectAudio } from '../preview/audioMix';
@@ -14,22 +14,30 @@ export interface ExportHandle {
  * Orchestrates an export: renders the audio mix offline on the main thread
  * (OfflineAudioContext is unavailable in workers), then hands everything to
  * the export worker which decodes, composites and encodes frame by frame.
+ * `region` (the timeline selection) restricts the render to that span.
  */
 export function startExport(
   project: Project,
   assets: Record<string, MediaAsset>,
   preset: ExportPreset,
   onProgress: (value: number) => void,
+  region?: LoopRegion | null,
 ): ExportHandle {
   let worker: Worker | null = null;
   let canceled = false;
 
   const promise = (async () => {
-    const durationMs = projectDurationMs(project);
-    if (durationMs <= 0) throw new Error('The project is empty — add clips to the timeline first.');
+    const projectMs = projectDurationMs(project);
+    if (projectMs <= 0) throw new Error('The project is empty — add clips to the timeline first.');
+
+    const startMs = region ? Math.max(0, Math.min(region.startMs, projectMs)) : 0;
+    const durationMs = (region ? Math.min(region.endMs, projectMs) : projectMs) - startMs;
+    if (durationMs <= 0) {
+      throw new Error('The selected region is empty — it sits past the end of the project.');
+    }
 
     onProgress(0.01);
-    const audio = await renderAudioMix(project, assets, durationMs);
+    const audio = await renderAudioMix(project, assets, startMs, durationMs);
     if (canceled) throw new Error('Export canceled.');
     if (preset.kind === 'mp3' && !audio) {
       throw new Error('Nothing to export as MP3: no audible audio in the project.');
@@ -44,7 +52,15 @@ export function startExport(
     }
 
     worker = new Worker(new URL('./exportWorker.ts', import.meta.url), { type: 'module' });
-    const request: ExportRequest = { type: 'export', project, files, preset, durationMs, audio };
+    const request: ExportRequest = {
+      type: 'export',
+      project,
+      files,
+      preset,
+      startMs,
+      durationMs,
+      audio,
+    };
 
     const buffer = await new Promise<{ buffer: ArrayBuffer; mime: string }>((resolve, reject) => {
       worker!.onmessage = (e: MessageEvent<WorkerReply>) => {
@@ -75,10 +91,11 @@ export function startExport(
   };
 }
 
-/** Render the full project audio mix with an OfflineAudioContext. */
+/** Render the exported span of the project audio mix with an OfflineAudioContext. */
 async function renderAudioMix(
   project: Project,
   assets: Record<string, MediaAsset>,
+  startMs: number,
   durationMs: number,
 ): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
   const buffers = new Map<string, AudioBuffer | null>();
@@ -87,7 +104,9 @@ async function renderAudioMix(
   for (const track of project.tracks) {
     if (track.muted) continue;
     for (const clip of track.clips) {
-      if (clip.volume <= 0 || clipEndMs(clip) <= 0) continue;
+      // Clips ending before the span, or starting after it, are silent here.
+      if (clip.volume <= 0 || clipEndMs(clip) <= startMs) continue;
+      if (clip.timelineStartMs >= startMs + durationMs) continue;
       const asset = assets[clip.assetId];
       if (!asset?.hasAudio) continue;
       if (!buffers.has(asset.id)) {
@@ -100,7 +119,7 @@ async function renderAudioMix(
 
   const length = Math.max(1, Math.ceil((durationMs / 1000) * AUDIO_SAMPLE_RATE));
   const ctx = new OfflineAudioContext(2, length, AUDIO_SAMPLE_RATE);
-  scheduleProjectAudio(ctx, ctx.destination, project, (id) => buffers.get(id) ?? null, 0, 0);
+  scheduleProjectAudio(ctx, ctx.destination, project, (id) => buffers.get(id) ?? null, startMs, 0);
   const rendered = await ctx.startRendering();
 
   return {

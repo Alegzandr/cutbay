@@ -4,7 +4,8 @@ import { useStore, projectDurationMs } from '../store/store';
 import { TrackRow } from './TrackRow';
 import { Ruler } from './Ruler';
 import { Playhead } from './Playhead';
-import { TIMELINE_PAD_LEFT } from '../app/config';
+import { MarkerBar, TimelineOverlay } from './MarkerBar';
+import { ASSET_DRAG_MIME, TIMELINE_PAD_LEFT } from '../app/config';
 import { useImport } from '../ui/useImport';
 import { useIsCoarsePointer } from '../lib/device';
 
@@ -163,9 +164,37 @@ export function Timeline() {
     };
   }, [coarse, empty]);
 
+  // Drag from the media library: drop an asset at a precise time (and track).
+  const onAssetDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes(ASSET_DRAG_MIME)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+  const onAssetDrop = (e: React.DragEvent) => {
+    const assetId = e.dataTransfer.getData(ASSET_DRAG_MIME);
+    if (!assetId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const s = useStore.getState();
+    const content = (e.currentTarget as HTMLElement).querySelector<HTMLElement>('[data-timeline-content]');
+    if (!content) {
+      s.addClipFromAssetAt(assetId, 0);
+      return;
+    }
+    const rect = content.getBoundingClientRect();
+    const ms = (e.clientX - rect.left - s.timelinePadLeft) / (s.pxPerSec / 1000);
+    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-track-id]');
+    s.addClipFromAssetAt(assetId, ms, row?.dataset.trackId);
+  };
+
   if (empty) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+      <div
+        className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center"
+        onDragOver={onAssetDragOver}
+        onDrop={onAssetDrop}
+      >
         <p className="text-sm text-zinc-500">
           {importing
             ? 'Importing…'
@@ -209,7 +238,7 @@ export function Timeline() {
   };
 
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className="relative min-h-0 flex-1" onDragOver={onAssetDragOver} onDrop={onAssetDrop}>
       <div
         ref={scrollerRef}
         className="timeline-scroller h-full overflow-auto overscroll-none bg-zinc-950"
@@ -219,12 +248,15 @@ export function Timeline() {
           className="relative min-h-full"
           style={{ width: contentWidth, minWidth: '100%' }}
         >
+          <MarkerBar pxPerMs={pxPerMs} />
           <Ruler durationMs={durationMs} pxPerMs={pxPerMs} overscanMs={coarse ? 0 : 30_000} />
           <div onPointerDown={onBgPointerDown} onPointerMove={onBgPointerMove}>
             {project.tracks.map((track) => (
               <TrackRow key={track.id} track={track} pxPerMs={pxPerMs} />
             ))}
           </div>
+          {/* Region shading + marker lines: after the tracks, so they paint over the clips. */}
+          <TimelineOverlay pxPerMs={pxPerMs} trackCount={project.tracks.length} />
 
           <div className="sticky left-0 flex w-fit gap-2 p-2">
             <button

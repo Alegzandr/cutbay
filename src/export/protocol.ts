@@ -9,6 +9,9 @@ export interface ExportRequest {
   /** assetId → File, for every asset referenced by the project. */
   files: Record<string, File>;
   preset: ExportPreset;
+  /** First timeline ms to render (loop region in point, 0 for the whole project). */
+  startMs: number;
+  /** Length of the rendered span, from startMs. */
   durationMs: number;
   /** Pre-rendered audio mix (OfflineAudioContext runs on the main thread only). */
   audio: { channels: Float32Array[]; sampleRate: number } | null;

@@ -35,7 +35,8 @@ export function ClipActionBar() {
             <SlidersHorizontal className="h-5 w-5" />
             Adjust
           </button>
-          <button className={item} onClick={() => useStore.getState().deleteClip(clip.id)}>
+          {/* CapCut semantics on touch: deleting a clip closes the gap it leaves. */}
+          <button className={item} onClick={() => useStore.getState().rippleDeleteClip(clip.id)}>
             <Trash2 className="h-5 w-5" />
             Delete
           </button>

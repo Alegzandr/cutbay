@@ -1,6 +1,7 @@
 import { memo, useMemo } from 'react';
 import { useStore } from '../store/store';
 import { formatTimeShort } from '../lib/time';
+import { MARKER_BAR_HEIGHT_PX, RULER_HEIGHT_PX } from '../app/config';
 
 const TICK_STEPS_SEC = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
 
@@ -33,7 +34,8 @@ export const Ruler = memo(function Ruler({ durationMs, pxPerMs, overscanMs }: Pr
 
   return (
     <div
-      className="sticky top-0 z-20 h-6 cursor-col-resize touch-none border-b border-zinc-800 bg-zinc-900/95"
+      className="sticky z-20 cursor-col-resize touch-none border-b border-zinc-800 bg-zinc-900/95"
+      style={{ top: MARKER_BAR_HEIGHT_PX, height: RULER_HEIGHT_PX }}
       onPointerDown={(e) => {
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         scrubTo(e);

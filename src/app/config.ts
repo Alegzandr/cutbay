@@ -18,7 +18,16 @@ export const DEFAULT_PX_PER_SEC = 60;
 /** Sample rate of the audio mix (preview + export). */
 export const AUDIO_SAMPLE_RATE = 48000;
 
+/** DataTransfer type used to drag an asset from the media library to the timeline. */
+export const ASSET_DRAG_MIME = 'application/x-cutbay-asset';
+
 /** Timeline geometry. */
 export const TRACK_HEIGHT_PX = 64;
 export const TIMELINE_PAD_LEFT = 48;
+/** Marker / loop-region bar, stacked above the ruler (both sticky at the top). */
+export const MARKER_BAR_HEIGHT_PX = 18;
+export const RULER_HEIGHT_PX = 24;
+
+/** Shortest loop region a drag can create — below that the drag reads as a click (clears it). */
+export const MIN_REGION_MS = 40;
 

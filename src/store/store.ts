@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import {
   Clip,
+  LoopRegion,
+  Marker,
   MediaAsset,
   Project,
   Track,
@@ -9,10 +11,20 @@ import {
   clipEndMs,
   timelineToSourceMs,
   projectDurationMs,
+  sortedMarkers,
 } from '../types';
 import { uid } from '../lib/id';
 import { clamp } from '../lib/time';
-import { DEFAULT_PX_PER_SEC, MIN_CLIP_DURATION_MS, MIN_PX_PER_SEC, MAX_PX_PER_SEC, PROJECT_FPS, TIMELINE_PAD_LEFT } from '../app/config';
+import { disposeAssetResources } from '../media/mediaCache';
+import {
+  DEFAULT_PX_PER_SEC,
+  MIN_CLIP_DURATION_MS,
+  MIN_PX_PER_SEC,
+  MAX_PX_PER_SEC,
+  MIN_REGION_MS,
+  PROJECT_FPS,
+  TIMELINE_PAD_LEFT,
+} from '../app/config';
 
 const HISTORY_LIMIT = 50;
 
@@ -24,11 +36,20 @@ interface ClipboardEntry {
 export interface EditorState {
   project: Project;
   assets: Record<string, MediaAsset>;
+  /** Primary selection (last clicked) — the one the inspector edits. */
   selectedClipId: string | null;
+  /** Full selection (multi-select via Ctrl/Cmd+click on desktop). */
+  selectedClipIds: string[];
   currentTimeMs: number;
   /** Incremented on every user seek — the playback engine resyncs to it. */
   seekVersion: number;
   playing: boolean;
+  /** Timeline selection (yellow corners): loop range and optional export range. */
+  loopRegion: LoopRegion | null;
+  /** Whether playback loops inside the region. */
+  loopEnabled: boolean;
+  /** Shuttle rate (J/K/L): 1 = normal. Reset to 1 whenever playback stops. */
+  playbackRate: number;
   pxPerSec: number;
   /** Left padding of the timeline content in px (half the viewport on mobile, fixed on desktop). */
   timelinePadLeft: number;
@@ -48,19 +69,37 @@ export interface EditorState {
   addAsset: (asset: MediaAsset) => void;
   removeAsset: (assetId: string) => void;
   addClipFromAsset: (assetId: string) => void;
+  /** Drop an asset at a specific timeline position (drag from the media library). */
+  addClipFromAssetAt: (assetId: string, timelineMs: number, targetTrackId?: string) => void;
+  /** Insert a generated text clip at the playhead, on a free topmost video track. */
+  addTextClip: () => void;
   addTrack: (kind: Track['kind']) => void;
+  /** Live track edit (volume/opacity slider drags) — wrap with begin/endGesture. */
+  updateTrack: (trackId: string, patch: Partial<Track>) => void;
+  updateTrackCommitted: (trackId: string, patch: Partial<Track>) => void;
   removeTrack: (trackId: string) => void;
   moveTrack: (trackId: string, dir: -1 | 1) => void;
   toggleTrackMuted: (trackId: string) => void;
   toggleTrackHidden: (trackId: string) => void;
 
+  setAssetPeaks: (assetId: string, peaks: number[]) => void;
+  setAssetThumbnails: (assetId: string, thumbnails: string[]) => void;
+
   selectClip: (id: string | null) => void;
+  /** Ctrl/Cmd+click: add/remove a clip from the multi-selection. */
+  toggleSelectClip: (id: string) => void;
   updateClip: (clipId: string, patch: Partial<Clip>) => void;
   updateClipCommitted: (clipId: string, patch: Partial<Clip>) => void;
   moveClip: (clipId: string, timelineStartMs: number, targetTrackId?: string) => void;
+  /** Batch position update (multi-selection drag), no history — wrap with begin/endGesture. */
+  moveClips: (entries: { clipId: string; timelineStartMs: number }[]) => void;
   trimClip: (clipId: string, edge: 'left' | 'right', timelineMs: number) => void;
   splitAtPlayhead: () => void;
   deleteClip: (clipId: string) => void;
+  /** Delete a clip and close the gap: later clips on the same track shift left. */
+  rippleDeleteClip: (clipId: string) => void;
+  /** Delete several clips as one undo step; ripple closes the gaps. */
+  deleteClips: (clipIds: string[], ripple: boolean) => void;
   duplicateClip: (clipId: string) => void;
   copyClip: (clipId: string) => void;
   cutClip: (clipId: string) => void;
@@ -74,6 +113,24 @@ export interface EditorState {
   seek: (ms: number) => void;
   setCurrentTimeFromEngine: (ms: number) => void;
   setPlaying: (playing: boolean) => void;
+  setPlaybackRate: (rate: number) => void;
+
+  /** Live during a drag on the region bar; a span shorter than MIN_REGION_MS clears it. */
+  setLoopRegion: (region: LoopRegion | null) => void;
+  /** I / O keys: pull one edge of the region to the playhead (creating it if needed). */
+  setRegionEdgeAtPlayhead: (edge: 'in' | 'out') => void;
+  toggleLoopEnabled: () => void;
+
+  /** Drop a marker at the playhead (no-op if one already sits there). */
+  addMarkerAtPlayhead: () => void;
+  /** Live marker drag — wrap with begin/endGesture. */
+  moveMarker: (markerId: string, timeMs: number) => void;
+  renameMarker: (markerId: string, label: string) => void;
+  removeMarker: (markerId: string) => void;
+  /** Replace the whole editor content (restore from IndexedDB at boot). */
+  hydrate: (project: Project, assets: MediaAsset[]) => void;
+  /** Start over: empty project, empty library, empty history. */
+  resetProject: () => void;
   setPxPerSec: (v: number) => void;
   setTimelinePadLeft: (px: number) => void;
   setInspectorOpen: (open: boolean) => void;
@@ -84,7 +141,89 @@ export interface EditorState {
 }
 
 function createEmptyProject(): Project {
-  return { id: uid('proj'), aspectRatio: '16:9', fps: PROJECT_FPS, tracks: [] };
+  return { id: uid('proj'), aspectRatio: '16:9', fps: PROJECT_FPS, tracks: [], markers: [] };
+}
+
+/**
+ * Overlap policy: two consecutive clips on a track MAY overlap — the overlap
+ * is rendered as a crossfade (Vegas-style transition by sliding a clip over
+ * its neighbor). What stays forbidden, with offenders pushed right:
+ * - a clip overlapping the clip two positions back (no triple overlap);
+ * - a clip starting less than MIN_CLIP_DURATION_MS after the previous one
+ *   (each clip keeps an exposed head, so ordering stays unambiguous).
+ * Copy-on-write: returns the same Project reference when nothing moved, and
+ * untouched tracks/clips keep their identity.
+ */
+function resolveOverlaps(p: Project, priorityClipId?: string | null): Project {
+  let projectChanged = false;
+  const tracks = p.tracks.map((track) => {
+    const sorted = [...track.clips].sort((a, b) => {
+      if (a.timelineStartMs !== b.timelineStartMs) return a.timelineStartMs - b.timelineStartMs;
+      if (a.id === priorityClipId) return -1;
+      if (b.id === priorityClipId) return 1;
+      return 0;
+    });
+    const movedTo = new Map<string, number>();
+    let prev: { start: number; end: number } | null = null;
+    let prevPrevEnd = 0;
+    for (const c of sorted) {
+      const minStart = prev ? Math.max(prevPrevEnd, prev.start + MIN_CLIP_DURATION_MS) : 0;
+      const start = Math.max(c.timelineStartMs, minStart);
+      if (start !== c.timelineStartMs) movedTo.set(c.id, start);
+      prevPrevEnd = prev ? prev.end : 0;
+      prev = { start, end: start + clipDurationMs(c) };
+    }
+    if (movedTo.size === 0) return track;
+    projectChanged = true;
+    return {
+      ...track,
+      clips: track.clips.map((c) =>
+        movedTo.has(c.id) ? { ...c, timelineStartMs: movedTo.get(c.id)! } : c,
+      ),
+    };
+  });
+  return projectChanged ? { ...p, tracks } : p;
+}
+
+/**
+ * Copy-on-write clip edits: only the touched clips (and their tracks) get a
+ * new identity, so memoized clip views of untouched clips skip re-rendering.
+ * An edit returning the same clip is a no-op; if nothing changed, the same
+ * Project reference comes back.
+ */
+function patchClips(p: Project, edits: Map<string, (c: Clip) => Clip>): Project {
+  let projectChanged = false;
+  const tracks = p.tracks.map((track) => {
+    let trackChanged = false;
+    const clips = track.clips.map((c) => {
+      const edit = edits.get(c.id);
+      if (!edit) return c;
+      const next = edit(c);
+      if (next === c) return c;
+      trackChanged = true;
+      return next;
+    });
+    if (!trackChanged) return track;
+    projectChanged = true;
+    return { ...track, clips };
+  });
+  return projectChanged ? { ...p, tracks } : p;
+}
+
+/** Find (or create) the track a clip of the given kind should land on. */
+function ensureTrack(p: Project, kind: Track['kind'], preferredTrackId?: string): Track {
+  const preferred = preferredTrackId ? p.tracks.find((t) => t.id === preferredTrackId) : undefined;
+  if (preferred && preferred.kind === kind) return preferred;
+  const existing = p.tracks.find((t) => t.kind === kind);
+  if (existing) return existing;
+  const track: Track = { id: uid('track'), kind, clips: [] };
+  if (kind === 'video') {
+    const lastVideoIdx = p.tracks.map((t) => t.kind).lastIndexOf('video');
+    p.tracks.splice(lastVideoIdx + 1, 0, track);
+  } else {
+    p.tracks.push(track);
+  }
+  return track;
 }
 
 function findClip(project: Project, clipId: string): { track: Track; clip: Clip; index: number } | null {
@@ -96,11 +235,17 @@ function findClip(project: Project, clipId: string): { track: Track; clip: Clip;
 }
 
 export const useStore = create<EditorState>((set, get) => {
-  /** Mutation recorded in history (one-shot operation). */
-  const withHistory = (fn: (p: Project) => void) => {
+  /**
+   * Mutation recorded in history (one-shot operation). `priorityClipId`
+   * names the clip that keeps its position when overlaps are settled
+   * (defaults to the current selection).
+   */
+  const withHistory = (fn: (p: Project) => void, priorityClipId?: string | null) => {
     const prev = get().project;
-    const next = structuredClone(prev);
+    let next = structuredClone(prev);
     fn(next);
+    // Every committed edit leaves the tracks in a legal layout (pairwise crossfades only).
+    next = resolveOverlaps(next, priorityClipId !== undefined ? priorityClipId : get().selectedClipId);
     set({
       project: next,
       past: [...get().past, prev].slice(-HISTORY_LIMIT),
@@ -108,20 +253,31 @@ export const useStore = create<EditorState>((set, get) => {
     });
   };
 
-  /** Mutation without history (used mid-gesture; wrap with begin/endGesture). */
-  const withoutHistory = (fn: (p: Project) => void) => {
-    const next = structuredClone(get().project);
-    fn(next);
-    set({ project: next });
+  /** Drop any selected ids whose clip no longer exists. */
+  const pruneSelection = () => {
+    const live = new Set<string>();
+    for (const t of get().project.tracks) for (const c of t.clips) live.add(c.id);
+    const ids = get().selectedClipIds.filter((id) => live.has(id));
+    if (ids.length !== get().selectedClipIds.length) {
+      set({
+        selectedClipIds: ids,
+        selectedClipId: ids[ids.length - 1] ?? null,
+        ...(ids.length === 0 ? { inspectorOpen: false } : {}),
+      });
+    }
   };
 
   return {
     project: createEmptyProject(),
     assets: {},
     selectedClipId: null,
+    selectedClipIds: [],
     currentTimeMs: 0,
     seekVersion: 0,
     playing: false,
+    loopRegion: null,
+    loopEnabled: false,
+    playbackRate: 1,
     pxPerSec: DEFAULT_PX_PER_SEC,
     timelinePadLeft: TIMELINE_PAD_LEFT,
     inspectorOpen: false,
@@ -138,20 +294,29 @@ export const useStore = create<EditorState>((set, get) => {
 
     addAsset: (asset) => set({ assets: { ...get().assets, [asset.id]: asset } }),
 
+    setAssetPeaks: (assetId, peaks) => {
+      const asset = get().assets[assetId];
+      if (!asset) return;
+      set({ assets: { ...get().assets, [assetId]: { ...asset, peaks } } });
+    },
+
+    setAssetThumbnails: (assetId, thumbnails) => {
+      const asset = get().assets[assetId];
+      if (!asset) return;
+      set({ assets: { ...get().assets, [assetId]: { ...asset, thumbnails } } });
+    },
+
     removeAsset: (assetId) => {
-      const selected = get().selectedClipId;
-      let selectedRemoved = false;
       withHistory((p) => {
         for (const track of p.tracks) {
-          if (selected && track.clips.some((c) => c.id === selected && c.assetId === assetId)) {
-            selectedRemoved = true;
-          }
           track.clips = track.clips.filter((c) => c.assetId !== assetId);
         }
       });
       const assets = { ...get().assets };
       delete assets[assetId];
-      set({ assets, ...(selectedRemoved ? { selectedClipId: null } : {}) });
+      set({ assets });
+      disposeAssetResources(assetId);
+      pruneSelection();
     },
 
     addClipFromAsset: (assetId) => {
@@ -159,16 +324,7 @@ export const useStore = create<EditorState>((set, get) => {
       if (!asset) return;
       let newClipId = '';
       withHistory((p) => {
-        let track = p.tracks.find((t) => t.kind === asset.kind);
-        if (!track) {
-          track = { id: uid('track'), kind: asset.kind, clips: [] };
-          if (asset.kind === 'video') {
-            const lastVideoIdx = p.tracks.map((t) => t.kind).lastIndexOf('video');
-            p.tracks.splice(lastVideoIdx + 1, 0, track);
-          } else {
-            p.tracks.push(track);
-          }
-        }
+        const track = ensureTrack(p, asset.kind);
         const start = track.clips.reduce((max, c) => Math.max(max, clipEndMs(c)), 0);
         const clip: Clip = {
           id: uid('clip'),
@@ -185,7 +341,67 @@ export const useStore = create<EditorState>((set, get) => {
         newClipId = clip.id;
         track.clips.push(clip);
       });
-      set({ selectedClipId: newClipId });
+      set({ selectedClipId: newClipId, selectedClipIds: [newClipId] });
+    },
+
+    addClipFromAssetAt: (assetId, timelineMs, targetTrackId) => {
+      const asset = get().assets[assetId];
+      if (!asset) return;
+      const newClipId = uid('clip');
+      // The dropped clip keeps its position (priority) when overlaps settle.
+      withHistory((p) => {
+        const track = ensureTrack(p, asset.kind, targetTrackId);
+        track.clips.push({
+          id: newClipId,
+          assetId,
+          trackId: track.id,
+          timelineStartMs: Math.max(0, timelineMs),
+          sourceInMs: 0,
+          sourceOutMs: asset.durationMs,
+          speed: 1,
+          volume: 1,
+          fadeInMs: 0,
+          fadeOutMs: 0,
+        });
+      }, newClipId);
+      set({ selectedClipId: newClipId, selectedClipIds: [newClipId] });
+    },
+
+    addTextClip: () => {
+      const { currentTimeMs } = get();
+      const newClipId = uid('clip');
+      const durMs = 3000;
+      withHistory((p) => {
+        const start = Math.max(0, currentTimeMs);
+        // Topmost video track with the interval free — a text clip is an overlay,
+        // it must not crossfade with the footage it sits on. Otherwise stack a new track.
+        let track = [...p.tracks]
+          .reverse()
+          .find(
+            (t) =>
+              t.kind === 'video' &&
+              t.clips.every((c) => clipEndMs(c) <= start || c.timelineStartMs >= start + durMs),
+          );
+        if (!track) {
+          track = { id: uid('track'), kind: 'video', clips: [] };
+          const lastVideoIdx = p.tracks.map((t) => t.kind).lastIndexOf('video');
+          p.tracks.splice(lastVideoIdx + 1, 0, track);
+        }
+        track.clips.push({
+          id: newClipId,
+          assetId: '',
+          trackId: track.id,
+          timelineStartMs: start,
+          sourceInMs: 0,
+          sourceOutMs: durMs,
+          speed: 1,
+          volume: 1,
+          fadeInMs: 0,
+          fadeOutMs: 0,
+          text: { content: 'Titre', color: '#ffffff', sizeFrac: 0.08, bold: true },
+        });
+      }, newClipId);
+      set({ selectedClipId: newClipId, selectedClipIds: [newClipId] });
     },
 
     addTrack: (kind) =>
@@ -200,14 +416,10 @@ export const useStore = create<EditorState>((set, get) => {
       }),
 
     removeTrack: (trackId) => {
-      const selected = get().selectedClipId;
-      const track = get().project.tracks.find((t) => t.id === trackId);
       withHistory((p) => {
         p.tracks = p.tracks.filter((t) => t.id !== trackId);
       });
-      if (selected && track?.clips.some((c) => c.id === selected)) {
-        set({ selectedClipId: null });
-      }
+      pruneSelection();
     },
 
     moveTrack: (trackId, dir) =>
@@ -230,13 +442,39 @@ export const useStore = create<EditorState>((set, get) => {
         if (t) t.hidden = !t.hidden;
       }),
 
+    updateTrack: (trackId, patch) => {
+      const p = get().project;
+      const tracks = p.tracks.map((t) => (t.id === trackId ? { ...t, ...patch } : t));
+      set({ project: { ...p, tracks } });
+    },
+
+    updateTrackCommitted: (trackId, patch) =>
+      withHistory((p) => {
+        const t = p.tracks.find((t) => t.id === trackId);
+        if (t) Object.assign(t, patch);
+      }),
+
     selectClip: (id) =>
-      set({ selectedClipId: id, ...(id === null ? { inspectorOpen: false } : {}) }),
+      set({
+        selectedClipId: id,
+        selectedClipIds: id ? [id] : [],
+        ...(id === null ? { inspectorOpen: false } : {}),
+      }),
+
+    toggleSelectClip: (id) => {
+      const ids = get().selectedClipIds.includes(id)
+        ? get().selectedClipIds.filter((x) => x !== id)
+        : [...get().selectedClipIds, id];
+      set({
+        selectedClipIds: ids,
+        selectedClipId: ids[ids.length - 1] ?? null,
+        ...(ids.length === 0 ? { inspectorOpen: false } : {}),
+      });
+    },
 
     updateClip: (clipId, patch) =>
-      withoutHistory((p) => {
-        const found = findClip(p, clipId);
-        if (found) Object.assign(found.clip, patch);
+      set({
+        project: patchClips(get().project, new Map([[clipId, (c: Clip) => ({ ...c, ...patch })]])),
       }),
 
     updateClipCommitted: (clipId, patch) =>
@@ -245,56 +483,81 @@ export const useStore = create<EditorState>((set, get) => {
         if (found) Object.assign(found.clip, patch);
       }),
 
-    moveClip: (clipId, timelineStartMs, targetTrackId) =>
-      withoutHistory((p) => {
-        const found = findClip(p, clipId);
-        if (!found) return;
-        const { track, clip, index } = found;
-        clip.timelineStartMs = Math.max(0, timelineStartMs);
-        if (targetTrackId && targetTrackId !== track.id) {
-          const target = p.tracks.find((t) => t.id === targetTrackId);
-          if (target && target.kind === track.kind) {
-            track.clips.splice(index, 1);
-            clip.trackId = target.id;
-            target.clips.push(clip);
-          }
-        }
-      }),
+    moveClip: (clipId, timelineStartMs, targetTrackId) => {
+      const p = get().project;
+      const found = findClip(p, clipId);
+      if (!found) return;
+      const start = Math.max(0, timelineStartMs);
+      const target =
+        targetTrackId && targetTrackId !== found.track.id
+          ? p.tracks.find((t) => t.id === targetTrackId)
+          : undefined;
+      if (target && target.kind === found.track.kind) {
+        const moved: Clip = { ...found.clip, timelineStartMs: start, trackId: target.id };
+        const tracks = p.tracks.map((t) => {
+          if (t.id === found.track.id) return { ...t, clips: t.clips.filter((c) => c.id !== clipId) };
+          if (t.id === target.id) return { ...t, clips: [...t.clips, moved] };
+          return t;
+        });
+        set({ project: { ...p, tracks } });
+        return;
+      }
+      if (found.clip.timelineStartMs === start) return;
+      set({
+        project: patchClips(p, new Map([[clipId, (c: Clip) => ({ ...c, timelineStartMs: start })]])),
+      });
+    },
+
+    moveClips: (entries) => {
+      const edits = new Map<string, (c: Clip) => Clip>();
+      for (const { clipId, timelineStartMs } of entries) {
+        const start = Math.max(0, timelineStartMs);
+        edits.set(clipId, (c) => (c.timelineStartMs === start ? c : { ...c, timelineStartMs: start }));
+      }
+      set({ project: patchClips(get().project, edits) });
+    },
 
     trimClip: (clipId, edge, timelineMs) => {
       const assets = get().assets;
-      withoutHistory((p) => {
-        const found = findClip(p, clipId);
-        if (!found) return;
-        const clip = found.clip;
+      const edit = (clip: Clip): Clip => {
         const asset = assets[clip.assetId];
         const minSourceSpan = MIN_CLIP_DURATION_MS * clip.speed;
         if (edge === 'left') {
           const proposed = Math.max(0, timelineMs);
           let sourceIn = clip.sourceInMs + (proposed - clip.timelineStartMs) * clip.speed;
           sourceIn = clamp(sourceIn, 0, clip.sourceOutMs - minSourceSpan);
-          clip.timelineStartMs += (sourceIn - clip.sourceInMs) / clip.speed;
-          clip.sourceInMs = sourceIn;
-        } else {
-          let sourceOut = clip.sourceInMs + (timelineMs - clip.timelineStartMs) * clip.speed;
-          const maxOut = asset ? asset.durationMs : Infinity;
-          sourceOut = clamp(sourceOut, clip.sourceInMs + minSourceSpan, maxOut);
-          clip.sourceOutMs = sourceOut;
+          if (sourceIn === clip.sourceInMs) return clip;
+          return {
+            ...clip,
+            timelineStartMs: clip.timelineStartMs + (sourceIn - clip.sourceInMs) / clip.speed,
+            sourceInMs: sourceIn,
+          };
         }
-      });
+        let sourceOut = clip.sourceInMs + (timelineMs - clip.timelineStartMs) * clip.speed;
+        const maxOut = asset ? asset.durationMs : Infinity;
+        sourceOut = clamp(sourceOut, clip.sourceInMs + minSourceSpan, maxOut);
+        if (sourceOut === clip.sourceOutMs) return clip;
+        return { ...clip, sourceOutMs: sourceOut };
+      };
+      set({ project: patchClips(get().project, new Map([[clipId, edit]])) });
     },
 
     splitAtPlayhead: () => {
       const { currentTimeMs, selectedClipId, project } = get();
       // Target: the selected clip if the playhead is inside it, otherwise every clip under it.
-      const targets: string[] = [];
-      for (const track of project.tracks) {
-        for (const clip of track.clips) {
-          const inside =
-            currentTimeMs > clip.timelineStartMs + 1 && currentTimeMs < clipEndMs(clip) - 1;
-          if (inside && (!selectedClipId || clip.id === selectedClipId)) targets.push(clip.id);
+      const collect = (onlySelected: boolean): string[] => {
+        const out: string[] = [];
+        for (const track of project.tracks) {
+          for (const clip of track.clips) {
+            const inside =
+              currentTimeMs > clip.timelineStartMs + 1 && currentTimeMs < clipEndMs(clip) - 1;
+            if (inside && (!onlySelected || clip.id === selectedClipId)) out.push(clip.id);
+          }
         }
-      }
+        return out;
+      };
+      let targets = selectedClipId ? collect(true) : [];
+      if (targets.length === 0) targets = collect(false);
       if (targets.length === 0) return;
       withHistory((p) => {
         for (const track of p.tracks) {
@@ -318,13 +581,33 @@ export const useStore = create<EditorState>((set, get) => {
       });
     },
 
-    deleteClip: (clipId) => {
+    deleteClip: (clipId) => get().deleteClips([clipId], false),
+
+    rippleDeleteClip: (clipId) => get().deleteClips([clipId], true),
+
+    deleteClips: (clipIds, ripple) => {
+      if (clipIds.length === 0) return;
       withHistory((p) => {
         for (const track of p.tracks) {
-          track.clips = track.clips.filter((c) => c.id !== clipId);
+          // Right-to-left so each ripple shift leaves the earlier targets in place.
+          const doomed = track.clips
+            .filter((c) => clipIds.includes(c.id))
+            .sort((a, b) => b.timelineStartMs - a.timelineStartMs);
+          for (const clip of doomed) {
+            const start = clip.timelineStartMs;
+            const gap = clipDurationMs(clip);
+            track.clips = track.clips.filter((c) => c.id !== clip.id);
+            if (ripple) {
+              for (const c of track.clips) {
+                if (c.timelineStartMs >= start) {
+                  c.timelineStartMs = Math.max(0, c.timelineStartMs - gap);
+                }
+              }
+            }
+          }
         }
       });
-      if (get().selectedClipId === clipId) set({ selectedClipId: null, inspectorOpen: false });
+      pruneSelection();
     },
 
     duplicateClip: (clipId) => {
@@ -340,7 +623,7 @@ export const useStore = create<EditorState>((set, get) => {
         newId = copy.id;
         found.track.clips.push(copy);
       });
-      if (newId) set({ selectedClipId: newId });
+      if (newId) set({ selectedClipId: newId, selectedClipIds: [newId] });
     },
 
     copyClip: (clipId) => {
@@ -356,35 +639,27 @@ export const useStore = create<EditorState>((set, get) => {
     pasteAtPlayhead: () => {
       const { clipboard, currentTimeMs } = get();
       if (!clipboard) return;
-      let newId = '';
+      const newId = uid('clip');
+      // The pasted clip keeps the playhead position (priority) when overlaps settle.
       withHistory((p) => {
-        let track =
-          p.tracks.find((t) => t.id === clipboard.clip.trackId && t.kind === clipboard.kind) ??
-          p.tracks.find((t) => t.kind === clipboard.kind);
-        if (!track) {
-          track = { id: uid('track'), kind: clipboard.kind, clips: [] };
-          if (clipboard.kind === 'video') {
-            const lastVideoIdx = p.tracks.map((t) => t.kind).lastIndexOf('video');
-            p.tracks.splice(lastVideoIdx + 1, 0, track);
-          } else {
-            p.tracks.push(track);
-          }
-        }
-        const clip: Clip = {
+        const track = ensureTrack(p, clipboard.kind, clipboard.clip.trackId);
+        track.clips.push({
           ...structuredClone(clipboard.clip),
-          id: uid('clip'),
+          id: newId,
           trackId: track.id,
           timelineStartMs: currentTimeMs,
-        };
-        newId = clip.id;
-        track.clips.push(clip);
-      });
-      set({ selectedClipId: newId });
+        });
+      }, newId);
+      set({ selectedClipId: newId, selectedClipIds: [newId] });
     },
 
     beginGesture: () => set({ gestureSnapshot: get().project }),
 
     endGesture: () => {
+      // Settle any illegal overlap created during the gesture (drag/trim);
+      // legal pairwise overlaps are kept — they are crossfades.
+      const settled = resolveOverlaps(get().project, get().selectedClipId);
+      if (settled !== get().project) set({ project: settled });
       const { gestureSnapshot, project, past } = get();
       if (gestureSnapshot && gestureSnapshot !== project) {
         set({
@@ -406,6 +681,7 @@ export const useStore = create<EditorState>((set, get) => {
         past: past.slice(0, -1),
         future: [project, ...future],
         selectedClipId: null,
+        selectedClipIds: [],
         inspectorOpen: false,
       });
     },
@@ -419,6 +695,7 @@ export const useStore = create<EditorState>((set, get) => {
         past: [...past, project].slice(-HISTORY_LIMIT),
         future: future.slice(1),
         selectedClipId: null,
+        selectedClipIds: [],
         inspectorOpen: false,
       });
     },
@@ -433,7 +710,111 @@ export const useStore = create<EditorState>((set, get) => {
 
     setCurrentTimeFromEngine: (ms) => set({ currentTimeMs: ms }),
 
-    setPlaying: (playing) => set({ playing }),
+    setPlaying: (playing) => {
+      const { loopEnabled, loopRegion, currentTimeMs } = get();
+      // Hitting play with the loop armed from outside the region starts at its in point.
+      if (
+        playing &&
+        loopEnabled &&
+        loopRegion &&
+        (currentTimeMs < loopRegion.startMs || currentTimeMs >= loopRegion.endMs)
+      ) {
+        get().seek(loopRegion.startMs);
+      }
+      set({ playing, ...(playing ? {} : { playbackRate: 1 }) });
+    },
+
+    setPlaybackRate: (rate) => set({ playbackRate: clamp(rate, 0.25, 8) }),
+
+    setLoopRegion: (region) => {
+      if (!region) {
+        set({ loopRegion: null });
+        return;
+      }
+      const startMs = Math.max(0, Math.min(region.startMs, region.endMs));
+      const endMs = Math.max(0, Math.max(region.startMs, region.endMs));
+      set({ loopRegion: endMs - startMs < MIN_REGION_MS ? null : { startMs, endMs } });
+    },
+
+    setRegionEdgeAtPlayhead: (edge) => {
+      const { loopRegion, currentTimeMs } = get();
+      const other = edge === 'in' ? loopRegion?.endMs : loopRegion?.startMs;
+      // No region yet (or the edge would cross the other one): the untouched edge
+      // falls back to the project end (I) or the origin (O).
+      const fallback = edge === 'in' ? projectDurationMs(get().project) : 0;
+      const anchor = other ?? fallback;
+      get().setLoopRegion(
+        edge === 'in'
+          ? { startMs: currentTimeMs, endMs: Math.max(currentTimeMs, anchor) }
+          : { startMs: Math.min(currentTimeMs, anchor), endMs: currentTimeMs },
+      );
+    },
+
+    toggleLoopEnabled: () => set({ loopEnabled: !get().loopEnabled }),
+
+    addMarkerAtPlayhead: () => {
+      const { currentTimeMs, project } = get();
+      if (sortedMarkers(project).some((m) => Math.abs(m.timeMs - currentTimeMs) < 1)) return;
+      withHistory((p) => {
+        p.markers = [
+          ...(p.markers ?? []),
+          { id: uid('marker'), timeMs: Math.max(0, currentTimeMs), label: '' },
+        ];
+      });
+    },
+
+    moveMarker: (markerId, timeMs) => {
+      const p = get().project;
+      const at = Math.max(0, timeMs);
+      const markers = p.markers.map((m) => (m.id === markerId ? { ...m, timeMs: at } : m));
+      set({ project: { ...p, markers } });
+    },
+
+    renameMarker: (markerId, label) =>
+      withHistory((p) => {
+        const marker = p.markers?.find((m) => m.id === markerId);
+        if (marker) marker.label = label;
+      }),
+
+    removeMarker: (markerId) =>
+      withHistory((p) => {
+        p.markers = (p.markers ?? []).filter((m) => m.id !== markerId);
+      }),
+
+    hydrate: (project, assets) => {
+      const map: Record<string, MediaAsset> = {};
+      for (const a of assets) map[a.id] = a;
+      set({
+        // Projects saved before markers existed restore without the field.
+        project: { ...project, markers: project.markers ?? [] },
+        assets: map,
+        past: [],
+        future: [],
+        selectedClipId: null,
+        selectedClipIds: [],
+        currentTimeMs: 0,
+        loopRegion: null,
+        seekVersion: get().seekVersion + 1,
+      });
+    },
+
+    resetProject: () => {
+      for (const id of Object.keys(get().assets)) disposeAssetResources(id);
+      set({
+        project: createEmptyProject(),
+        assets: {},
+        past: [],
+        future: [],
+        selectedClipId: null,
+        selectedClipIds: [],
+        clipboard: null,
+        inspectorOpen: false,
+        currentTimeMs: 0,
+        loopRegion: null,
+        seekVersion: get().seekVersion + 1,
+        playing: false,
+      });
+    },
 
     setPxPerSec: (v) => set({ pxPerSec: clamp(v, MIN_PX_PER_SEC, MAX_PX_PER_SEC) }),
 
@@ -460,4 +841,5 @@ export function getSelectedClip(state: EditorState): Clip | null {
   return null;
 }
 
-export { clipDurationMs, clipEndMs, projectDurationMs };
+export { clipDurationMs, clipEndMs, projectDurationMs, sortedMarkers };
+export type { LoopRegion, Marker };

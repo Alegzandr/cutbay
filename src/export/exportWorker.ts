@@ -15,8 +15,8 @@ import {
 } from 'mediabunny';
 import { registerAacEncoder } from '@mediabunny/aac-encoder';
 import { registerMp3Encoder } from '@mediabunny/mp3-encoder';
-import { Clip, timelineToSourceMs } from '../types';
-import { drawClipSample, topClipAt } from '../preview/compositor';
+import { Clip, isTextClip, timelineToSourceMs, trackCrossfades } from '../types';
+import { clipsAt, drawClipSample, drawTextClip } from '../preview/compositor';
 import { ExportRequest, WorkerReply } from './protocol';
 
 /**
@@ -52,7 +52,7 @@ function postProgress(value: number): void {
 }
 
 async function exportMp4(req: ExportRequest): Promise<void> {
-  const { project, preset, files, durationMs, audio } = req;
+  const { project, preset, files, startMs, durationMs, audio } = req;
   const width = preset.width!;
   const height = preset.height!;
 
@@ -115,26 +115,41 @@ async function exportMp4(req: ExportRequest): Promise<void> {
   const videoWeight = audio ? 0.92 : 0.98;
 
   for (let i = 0; i < totalFrames; i++) {
-    const tMs = (i * 1000) / preset.fps;
+    // Output time i/fps maps to timeline time startMs + i/fps: exporting a
+    // region shifts what we read, never where the frame lands in the file.
+    const tMs = startMs + (i * 1000) / preset.fps;
     ctx.globalAlpha = 1;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, height);
 
     for (const track of project.tracks) {
       if (track.kind !== 'video' || track.hidden) continue;
-      const clip = topClipAt(track.clips, tMs);
-      if (!clip) continue;
-      const sink = await getSink(clip);
-      if (!sink) continue;
+      const alphaMul = track.opacity ?? 1;
+      if (alphaMul <= 0) continue;
+      const visible = clipsAt(track.clips, tMs);
+      if (visible.length === 0) continue;
+      const xfades = trackCrossfades(track.clips);
 
-      const sourceSec = timelineToSourceMs(clip, tMs) / 1000;
-      const sample = await sink.getSample(Math.max(0, sourceSec));
-      if (sample) {
-        lastSamples.get(clip.id)?.close();
-        lastSamples.set(clip.id, sample);
+      // Earliest-first: during a crossfade the incoming clip composites over
+      // the outgoing one with rising alpha (same as the preview).
+      for (const clip of visible) {
+        const xfadeInMs = xfades.get(clip.id)?.inMs ?? 0;
+        if (isTextClip(clip)) {
+          drawTextClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs);
+          continue;
+        }
+        const sink = await getSink(clip);
+        if (!sink) continue;
+
+        const sourceSec = timelineToSourceMs(clip, tMs) / 1000;
+        const sample = await sink.getSample(Math.max(0, sourceSec));
+        if (sample) {
+          lastSamples.get(clip.id)?.close();
+          lastSamples.set(clip.id, sample);
+        }
+        const toDraw = sample ?? lastSamples.get(clip.id) ?? null;
+        if (toDraw) drawClipSample(ctx, toDraw, clip, width, height, tMs, alphaMul, xfadeInMs);
       }
-      const toDraw = sample ?? lastSamples.get(clip.id) ?? null;
-      if (toDraw) drawClipSample(ctx, toDraw, clip, width, height, tMs);
     }
 
     await videoSource.add(i * frameDur, frameDur);
