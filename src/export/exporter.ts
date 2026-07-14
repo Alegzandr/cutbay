@@ -1,13 +1,29 @@
 import { LoopRegion, MediaAsset, Project, clipEndMs, projectDurationMs } from '../types';
 import { AUDIO_SAMPLE_RATE } from '../app/config';
+import { t } from '../i18n';
 import { getAudioBuffer } from '../media/mediaCache';
 import { scheduleProjectAudio } from '../preview/audioMix';
 import { ExportPreset, exportFileName } from './presets';
-import { ExportRequest, WorkerReply } from './protocol';
+import { ExportErrorCode, ExportRequest, WorkerReply } from './protocol';
 
 export interface ExportHandle {
   promise: Promise<{ blob: Blob; filename: string }>;
   cancel: () => void;
+}
+
+/** The worker speaks in codes; the main thread owns the locale and the wording. */
+const ERROR_KEYS = {
+  noAudibleAudio: 'errors.export.noAudibleAudio',
+} as const satisfies Record<ExportErrorCode, string>;
+
+/**
+ * A worker crash is not a business failure: the browser hands us an untranslated
+ * native message, which we keep as a diagnostic rather than swallow.
+ */
+function crashError(detail: string): Error {
+  return new Error(
+    detail ? t('errors.export.workerCrashedDetail', { detail }) : t('errors.export.workerCrashed'),
+  );
 }
 
 /**
@@ -28,19 +44,19 @@ export function startExport(
 
   const promise = (async () => {
     const projectMs = projectDurationMs(project);
-    if (projectMs <= 0) throw new Error('The project is empty — add clips to the timeline first.');
+    if (projectMs <= 0) throw new Error(t('errors.export.emptyProject'));
 
     const startMs = region ? Math.max(0, Math.min(region.startMs, projectMs)) : 0;
     const durationMs = (region ? Math.min(region.endMs, projectMs) : projectMs) - startMs;
     if (durationMs <= 0) {
-      throw new Error('The selected region is empty — it sits past the end of the project.');
+      throw new Error(t('errors.export.emptyRegion'));
     }
 
     onProgress(0.01);
     const audio = await renderAudioMix(project, assets, startMs, durationMs);
-    if (canceled) throw new Error('Export canceled.');
+    if (canceled) throw new Error(t('errors.export.canceled'));
     if (preset.kind === 'mp3' && !audio) {
-      throw new Error('Nothing to export as MP3: no audible audio in the project.');
+      throw new Error(t(ERROR_KEYS.noAudibleAudio));
     }
 
     const files: Record<string, File> = {};
@@ -67,9 +83,10 @@ export function startExport(
         const msg = e.data;
         if (msg.type === 'progress') onProgress(0.02 + msg.value * 0.98);
         else if (msg.type === 'done') resolve({ buffer: msg.buffer, mime: msg.mime });
-        else reject(new Error(msg.message));
+        else if (msg.type === 'error') reject(new Error(t(ERROR_KEYS[msg.code])));
+        else reject(crashError(msg.detail));
       };
-      worker!.onerror = (e) => reject(new Error(e.message || 'Export worker crashed.'));
+      worker!.onerror = (e) => reject(crashError(e.message));
       const transfer = audio ? audio.channels.map((c) => c.buffer as ArrayBuffer) : [];
       worker!.postMessage(request, transfer);
     });

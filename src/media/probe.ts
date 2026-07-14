@@ -3,6 +3,7 @@ import { MediaAsset } from '../types';
 import { uid } from '../lib/id';
 import { createInput, expectedPeakBins, getInput, getPeaks, registerInput, warmAudio } from './mediaCache';
 import { useStore } from '../store/store';
+import { t } from '../i18n';
 
 /**
  * Probe an imported file: metadata + a first quick thumbnail.
@@ -14,24 +15,24 @@ export async function probeFile(file: File): Promise<MediaAsset> {
   const input = createInput(file);
   if (!(await input.canRead())) {
     input.dispose();
-    throw new Error(`Unsupported format: ${file.name}`);
+    throw new Error(t('errors.media.unsupportedFormat', { name: file.name }));
   }
 
   const videoTrack = await input.getPrimaryVideoTrack();
   const audioTrack = await input.getPrimaryAudioTrack();
   if (!videoTrack && !audioTrack) {
     input.dispose();
-    throw new Error(`No audio or video track in ${file.name}`);
+    throw new Error(t('errors.media.noTrack', { name: file.name }));
   }
   if (videoTrack && !(await videoTrack.canDecode())) {
     input.dispose();
-    throw new Error(`Video codec cannot be decoded: ${file.name}`);
+    throw new Error(t('errors.media.undecodableVideo', { name: file.name }));
   }
 
   const durationMs = (await input.computeDuration()) * 1000;
   if (!isFinite(durationMs) || durationMs <= 0) {
     input.dispose();
-    throw new Error(`Invalid duration: ${file.name}`);
+    throw new Error(t('errors.media.invalidDuration', { name: file.name }));
   }
 
   const asset: MediaAsset = {

@@ -1,73 +1,133 @@
+import { useMemo } from 'react';
+import type { ParseKeys } from 'i18next';
+import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useStore } from '../store/store';
 
-const GROUPS: { title: string; rows: [string, string][] }[] = [
+/**
+ * Shortcut table. `GROUPS` lives outside the component, so it holds i18n *keys*
+ * only - never translated text, which would freeze at the boot locale.
+ *
+ * The `keys` cell (left column) is a template: letters and symbols (S, ?, ←,
+ * [ / ]) are locale-independent and stay literal, while the named keys and mouse
+ * gestures are `{{token}}` placeholders resolved against the `shortcuts.key.*`
+ * dictionary at render time. A French translator writes "Maj" once and every
+ * "Shift + ..." row follows, rather than 43 hand-written combinations.
+ */
+type Group = {
+  readonly title: ParseKeys;
+  readonly rows: readonly (readonly [keys: string, desc: ParseKeys])[];
+};
+
+const GROUPS: readonly Group[] = [
   {
-    title: 'Playback',
+    title: 'shortcuts.group.playback',
     rows: [
-      ['Space', 'Play / pause'],
-      ['K', 'Pause'],
-      ['L', 'Play — repeat: shuttle ×2 ×4 ×8'],
-      ['J', 'Playing: slow shuttle — paused: back 1s'],
+      ['{{space}}', 'shortcuts.playback.playPause'],
+      ['K', 'shortcuts.playback.pause'],
+      ['L', 'shortcuts.playback.shuttle'],
+      ['J', 'shortcuts.playback.reverse'],
     ],
   },
   {
-    title: 'Navigate',
+    title: 'shortcuts.group.navigate',
     rows: [
-      ['← / →', 'Previous / next frame'],
-      ['Shift + ← / →', 'Back / forward 1s'],
-      ['Ctrl + ← / →', 'Previous / next cut point'],
-      ['1 … 9', 'Jump to marker n'],
-      ['Home / End', 'Start / end of project'],
+      ['←  / →', 'shortcuts.navigate.frame'],
+      ['{{shift}} + ←  / →', 'shortcuts.navigate.second'],
+      ['{{ctrl}} + ←  / →', 'shortcuts.navigate.cutPoint'],
+      ['1 … 9', 'shortcuts.navigate.marker'],
+      ['{{home}} / {{end}}', 'shortcuts.navigate.bounds'],
     ],
   },
   {
-    title: 'Region & markers',
+    title: 'shortcuts.group.region',
     rows: [
-      ['Drag the top bar', 'Select a region (yellow corners)'],
-      ['Click the top bar', 'Clear the region'],
-      ['I / O', 'Region in / out at playhead'],
-      ['Q', 'Loop playback over the region'],
-      ['M', 'Add a marker at the playhead'],
-      ['Drag a marker', 'Move it (snaps)'],
-      ['Double-click a marker', 'Rename it'],
-      ['Right-click a marker', 'Delete it'],
+      ['{{dragTopBar}}', 'shortcuts.region.select'],
+      ['{{clickTopBar}}', 'shortcuts.region.clear'],
+      ['I / O', 'shortcuts.region.inOut'],
+      ['Q', 'shortcuts.region.loop'],
+      ['M', 'shortcuts.region.addMarker'],
+      ['{{dragMarker}}', 'shortcuts.region.moveMarker'],
+      ['{{doubleClickMarker}}', 'shortcuts.region.renameMarker'],
+      ['{{rightClickMarker}}', 'shortcuts.region.deleteMarker'],
     ],
   },
   {
-    title: 'Zoom & view',
+    title: 'shortcuts.group.zoom',
     rows: [
-      ['↑ / ↓  or  + / −', 'Zoom in / out at playhead'],
-      ['Shift + Z', 'Zoom to fit project'],
-      ['Ctrl + wheel', 'Zoom at cursor'],
-      ['Wheel', 'Pan timeline'],
-      ['Alt + wheel', 'Scroll tracks vertically'],
+      ['↑ / ↓  {{or}}  + / −', 'shortcuts.zoom.inOut'],
+      ['{{shift}} + Z', 'shortcuts.zoom.fit'],
+      ['{{ctrl}} + {{wheel}}', 'shortcuts.zoom.cursor'],
+      ['{{wheel}}', 'shortcuts.zoom.pan'],
+      ['{{alt}} + {{wheel}}', 'shortcuts.zoom.scrollTracks'],
     ],
   },
   {
-    title: 'Edit',
+    title: 'shortcuts.group.edit',
     rows: [
-      ['S', 'Split at playhead'],
-      ['T', 'Add a text clip at playhead'],
-      ['Drag clip over neighbor', 'Crossfade (overlap)'],
-      ['Drag top corner handle', 'Fade in / out'],
-      ['Ctrl + click', 'Add / remove from multi-selection'],
-      ['Del / Backspace', 'Delete selected clip(s)'],
-      ['Shift + Del', 'Ripple delete (close the gap)'],
-      [', / .', 'Nudge clip by one frame'],
-      ['[ / ]', 'Trim clip start / end to playhead'],
-      ['Alt + drag', 'Disable snapping'],
-      ['Ctrl + C / X / V', 'Copy / cut / paste clip'],
-      ['Ctrl + D', 'Duplicate clip'],
-      ['Ctrl + Z / Y', 'Undo / redo'],
-      ['Esc', 'Deselect'],
-      ['?', 'Toggle this panel'],
+      ['S', 'shortcuts.edit.split'],
+      ['P', 'shortcuts.edit.punchIn'],
+      ['T', 'shortcuts.edit.textClip'],
+      ['{{dragClipOverNeighbor}}', 'shortcuts.edit.crossfade'],
+      ['{{dragCornerHandle}}', 'shortcuts.edit.fade'],
+      ['{{ctrl}} + {{click}}', 'shortcuts.edit.multiSelect'],
+      ['{{ctrl}} + A', 'shortcuts.edit.selectAll'],
+      ['{{del}} / {{backspace}}', 'shortcuts.edit.delete'],
+      ['{{shift}} + {{del}}', 'shortcuts.edit.rippleDelete'],
+      [', / .', 'shortcuts.edit.nudge'],
+      ['[ / ]', 'shortcuts.edit.trim'],
+      ['N', 'shortcuts.edit.snap'],
+      ['{{alt}} + {{drag}}', 'shortcuts.edit.invertSnap'],
+      ['{{ctrl}} + C / X / V', 'shortcuts.edit.clipboard'],
+      ['{{ctrl}} + D', 'shortcuts.edit.duplicate'],
+      ['{{ctrl}} + Z / Y', 'shortcuts.edit.undoRedo'],
+      ['{{ctrl}} + E', 'shortcuts.edit.export'],
+      ['{{esc}}', 'shortcuts.edit.deselect'],
+      ['?', 'shortcuts.edit.togglePanel'],
     ],
   },
 ];
 
+const TOKEN = /\{\{(\w+)\}\}/g;
+
+/** Localised labels of the named keys and gestures used in the `keys` templates. */
+function useKeyLabels(): Readonly<Record<string, string>> {
+  const { t } = useTranslation();
+  return useMemo(
+    () => ({
+      space: t('shortcuts.key.space'),
+      shift: t('shortcuts.key.shift'),
+      ctrl: t('shortcuts.key.ctrl'),
+      alt: t('shortcuts.key.alt'),
+      del: t('shortcuts.key.del'),
+      backspace: t('shortcuts.key.backspace'),
+      esc: t('shortcuts.key.esc'),
+      home: t('shortcuts.key.home'),
+      end: t('shortcuts.key.end'),
+      wheel: t('shortcuts.key.wheel'),
+      drag: t('shortcuts.key.drag'),
+      click: t('shortcuts.key.click'),
+      or: t('shortcuts.key.or'),
+      dragTopBar: t('shortcuts.key.dragTopBar'),
+      clickTopBar: t('shortcuts.key.clickTopBar'),
+      dragMarker: t('shortcuts.key.dragMarker'),
+      doubleClickMarker: t('shortcuts.key.doubleClickMarker'),
+      rightClickMarker: t('shortcuts.key.rightClickMarker'),
+      dragClipOverNeighbor: t('shortcuts.key.dragClipOverNeighbor'),
+      dragCornerHandle: t('shortcuts.key.dragCornerHandle'),
+    }),
+    [t],
+  );
+}
+
+function formatKeys(template: string, labels: Readonly<Record<string, string>>): string {
+  return template.replace(TOKEN, (whole, token: string) => labels[token] ?? whole);
+}
+
 export function ShortcutsHelp() {
+  const { t } = useTranslation();
+  const labels = useKeyLabels();
   const open = useStore((s) => s.shortcutsOpen);
   const { setShortcutsOpen } = useStore.getState();
 
@@ -89,11 +149,11 @@ export function ShortcutsHelp() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-zinc-100">Keyboard shortcuts</h2>
+              <h2 className="text-sm font-semibold text-zinc-100">{t('shortcuts.title')}</h2>
               <button
                 className="rounded-lg p-1.5 text-zinc-400 active:bg-zinc-800"
                 onClick={() => setShortcutsOpen(false)}
-                title="Close"
+                title={t('shortcuts.close')}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -102,13 +162,13 @@ export function ShortcutsHelp() {
               {GROUPS.map((g) => (
                 <div key={g.title}>
                   <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
-                    {g.title}
+                    {t(g.title)}
                   </h3>
                   <dl className="space-y-1">
-                    {g.rows.map(([keys, label]) => (
-                      <div key={keys} className="flex items-baseline justify-between gap-3 text-xs">
-                        <dt className="font-mono text-zinc-300">{keys}</dt>
-                        <dd className="text-right text-zinc-500">{label}</dd>
+                    {g.rows.map(([keys, desc]) => (
+                      <div key={desc} className="flex items-baseline justify-between gap-3 text-xs">
+                        <dt className="font-mono text-zinc-300">{formatKeys(keys, labels)}</dt>
+                        <dd className="text-right text-zinc-500">{t(desc)}</dd>
                       </div>
                     ))}
                   </dl>

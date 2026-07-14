@@ -17,11 +17,20 @@ export function formatTimeShort(ms: number): string {
 
 /** Format a time in ms → "m:ss:ff" timecode at the given frame rate. */
 export function formatTimecode(ms: number, fps: number): string {
+  const { main, frames } = formatTimecodeParts(ms, fps);
+  return `${main}:${frames}`;
+}
+
+/**
+ * Timecode split into "m:ss" + frame count, so the UI can de-emphasize the
+ * frames - "0:03:57" read as one string looks like 3 min 57 s.
+ */
+export function formatTimecodeParts(ms: number, fps: number): { main: string; frames: string } {
   const totalSec = Math.max(0, ms) / 1000;
   const m = Math.floor(totalSec / 60);
   const s = Math.floor(totalSec % 60);
   const f = Math.floor((totalSec - Math.floor(totalSec)) * fps);
-  return `${m}:${s.toString().padStart(2, '0')}:${f.toString().padStart(2, '0')}`;
+  return { main: `${m}:${s.toString().padStart(2, '0')}`, frames: f.toString().padStart(2, '0') };
 }
 
 export function clamp(v: number, min: number, max: number): number {

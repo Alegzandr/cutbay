@@ -3,8 +3,13 @@ import { APP_NAME, PROJECT_FPS } from '../app/config';
 
 export interface ExportPreset {
   id: string;
-  label: string;
-  description: string;
+  /**
+   * Translation keys, not strings: the module is evaluated once at import time,
+   * while the locale can still change afterwards. The UI resolves them at render
+   * (`description` interpolates `{{fps}}`).
+   */
+  labelKey: string;
+  descriptionKey: string;
   kind: 'mp4' | 'mp3';
   /** MP4 presets are tied to a project aspect ratio; MP3 fits any. */
   aspect?: AspectRatio;
@@ -18,8 +23,8 @@ export interface ExportPreset {
 export const PRESETS: ExportPreset[] = [
   {
     id: 'youtube',
-    label: 'YouTube 16:9',
-    description: `1920×1080 @ ${PROJECT_FPS} fps · H.264 ~12 Mbps · AAC 192 kbps`,
+    labelKey: 'export.preset.youtube.label',
+    descriptionKey: 'export.preset.youtube.description',
     kind: 'mp4',
     aspect: '16:9',
     width: 1920,
@@ -30,8 +35,8 @@ export const PRESETS: ExportPreset[] = [
   },
   {
     id: 'tiktok',
-    label: 'TikTok 9:16',
-    description: `1080×1920 @ ${PROJECT_FPS} fps · H.264 ~10 Mbps · AAC 192 kbps`,
+    labelKey: 'export.preset.tiktok.label',
+    descriptionKey: 'export.preset.tiktok.description',
     kind: 'mp4',
     aspect: '9:16',
     width: 1080,
@@ -41,9 +46,33 @@ export const PRESETS: ExportPreset[] = [
     audioBitrate: 192_000,
   },
   {
+    id: 'square',
+    labelKey: 'export.preset.square.label',
+    descriptionKey: 'export.preset.square.description',
+    kind: 'mp4',
+    aspect: '1:1',
+    width: 1080,
+    height: 1080,
+    fps: PROJECT_FPS,
+    videoBitrate: 8_000_000,
+    audioBitrate: 192_000,
+  },
+  {
+    id: 'portrait45',
+    labelKey: 'export.preset.portrait45.label',
+    descriptionKey: 'export.preset.portrait45.description',
+    kind: 'mp4',
+    aspect: '4:5',
+    width: 1080,
+    height: 1350,
+    fps: PROJECT_FPS,
+    videoBitrate: 9_000_000,
+    audioBitrate: 192_000,
+  },
+  {
     id: 'mp3',
-    label: 'MP3 (audio only)',
-    description: 'Full mix · 320 kbps',
+    labelKey: 'export.preset.mp3.label',
+    descriptionKey: 'export.preset.mp3.description',
     kind: 'mp3',
     fps: PROJECT_FPS,
     audioBitrate: 320_000,

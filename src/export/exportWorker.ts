@@ -17,14 +17,26 @@ import { registerAacEncoder } from '@mediabunny/aac-encoder';
 import { registerMp3Encoder } from '@mediabunny/mp3-encoder';
 import { Clip, isTextClip, timelineToSourceMs, trackCrossfades } from '../types';
 import { clipsAt, drawClipSample, drawTextClip } from '../preview/compositor';
-import { ExportRequest, WorkerReply } from './protocol';
+import { ExportErrorCode, ExportRequest, WorkerReply } from './protocol';
 
 /**
  * Offline export pipeline. Iterates output frames at the preset fps, maps
  * output time to source time per clip, decodes with mediabunny sinks,
  * composites on an OffscreenCanvas and encodes through WebCodecs.
  * Never touches the preview pipeline.
+ *
+ * The worker is a separate bundle with no i18n instance and no knowledge of the
+ * user locale: expected failures travel as an `ExportErrorCode`, translated by
+ * the main thread. Unexpected ones travel as a raw diagnostic `crash` detail.
  */
+
+/** An expected, user-facing failure - carries a code, never a message. */
+class ExportError extends Error {
+  constructor(readonly code: ExportErrorCode) {
+    super(code);
+    this.name = 'ExportError';
+  }
+}
 
 const worker = self as unknown as {
   postMessage(message: WorkerReply, options?: StructuredSerializeOptions): void;
@@ -39,10 +51,11 @@ worker.onmessage = (e) => {
         else await exportMp4(e.data);
       }
     } catch (err) {
-      worker.postMessage({
-        type: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
+      worker.postMessage(
+        err instanceof ExportError
+          ? { type: 'error', code: err.code }
+          : { type: 'crash', detail: err instanceof Error ? err.message : String(err) },
+      );
     }
   })();
 };
@@ -176,7 +189,7 @@ async function exportMp4(req: ExportRequest): Promise<void> {
 
 async function exportMp3(req: ExportRequest): Promise<void> {
   const { preset, audio } = req;
-  if (!audio) throw new Error('Nothing to export: the project has no audible audio.');
+  if (!audio) throw new ExportError('noAudibleAudio');
 
   if (!(await canEncodeAudio('mp3'))) registerMp3Encoder();
 

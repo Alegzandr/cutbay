@@ -10,7 +10,7 @@ import { ensureAssetVisuals } from '../media/probe';
  * library changes.
  */
 
-const DB_NAME = 'cutbay';
+const DB_NAME = 'selfcut';
 const DB_VERSION = 1;
 const PROJECT_STORE = 'project';
 const ASSETS_STORE = 'assets';

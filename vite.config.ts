@@ -38,7 +38,7 @@ function injectCsp(): Plugin {
 
 // Base path = nom du repo GitHub pour le déploiement sur GitHub Pages.
 // Changez BASE_PATH (ou définissez la variable d'env VITE_BASE) si le repo est renommé.
-const BASE_PATH = process.env.VITE_BASE ?? '/cutbay/';
+const BASE_PATH = process.env.VITE_BASE ?? '/selfcut/';
 
 export default defineConfig({
   base: BASE_PATH,

@@ -1,11 +1,12 @@
 import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Eye, EyeOff, Film, Music2, Trash2, Volume2, VolumeX } from 'lucide-react';
 import { Track, trackCrossfades } from '../types';
 import { useStore } from '../store/store';
 import { useIsCoarsePointer } from '../lib/device';
 import { ClipView } from './ClipView';
 import { TrackMeter } from './TrackMeter';
-import { TRACK_HEIGHT_PX } from '../app/config';
+import { TRACK_HEADER_WIDTH_PX, TRACK_HEIGHT_PX } from '../app/config';
 
 interface Props {
   track: Track;
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export const TrackRow = memo(function TrackRow({ track, pxPerMs }: Props) {
+  const { t } = useTranslation();
   const selectedClipIds = useStore((s) => s.selectedClipIds);
   const coarse = useIsCoarsePointer();
   const { toggleTrackMuted, toggleTrackHidden, moveTrack, removeTrack, updateTrack, beginGesture, endGesture } =
@@ -33,7 +35,8 @@ export const TrackRow = memo(function TrackRow({ track, pxPerMs }: Props) {
     >
       {/* Sticky track header: buttons + (desktop) volume/opacity sliders and level meter */}
       <div
-        className={`sticky left-0 z-10 flex h-full items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-0.5 ${coarse ? 'w-11 justify-center' : 'w-28 px-1'}`}
+        className={`sticky left-0 z-10 flex h-full items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-0.5 ${coarse ? 'w-11 justify-center' : 'px-1'}`}
+        style={coarse ? undefined : { width: TRACK_HEADER_WIDTH_PX }}
       >
         <div className="flex flex-none flex-col items-center justify-center gap-0.5">
           <div className="flex items-center gap-0.5">
@@ -42,12 +45,12 @@ export const TrackRow = memo(function TrackRow({ track, pxPerMs }: Props) {
             ) : (
               <Music2 className="h-3 w-3 text-emerald-400" />
             )}
-            <button className={btn} onClick={() => removeTrack(track.id)} title="Delete track">
+            <button className={btn} onClick={() => removeTrack(track.id)} title={t('track.delete')}>
               <Trash2 className="h-3 w-3" />
             </button>
           </div>
           <div className="flex items-center gap-0.5">
-            <button className={btn} onClick={() => toggleTrackMuted(track.id)} title="Mute track">
+            <button className={btn} onClick={() => toggleTrackMuted(track.id)} title={t('track.mute')}>
               {track.muted ? (
                 <VolumeX className="h-3 w-3 text-red-400" />
               ) : (
@@ -55,7 +58,7 @@ export const TrackRow = memo(function TrackRow({ track, pxPerMs }: Props) {
               )}
             </button>
             {track.kind === 'video' ? (
-              <button className={btn} onClick={() => toggleTrackHidden(track.id)} title="Hide track">
+              <button className={btn} onClick={() => toggleTrackHidden(track.id)} title={t('track.hide')}>
                 {track.hidden ? <EyeOff className="h-3 w-3 text-red-400" /> : <Eye className="h-3 w-3" />}
               </button>
             ) : (
@@ -63,10 +66,10 @@ export const TrackRow = memo(function TrackRow({ track, pxPerMs }: Props) {
             )}
           </div>
           <div className="flex items-center gap-0.5">
-            <button className={btn} onClick={() => moveTrack(track.id, -1)} title="Move track up">
+            <button className={btn} onClick={() => moveTrack(track.id, -1)} title={t('track.moveUp')}>
               <ChevronUp className="h-3 w-3" />
             </button>
-            <button className={btn} onClick={() => moveTrack(track.id, 1)} title="Move track down">
+            <button className={btn} onClick={() => moveTrack(track.id, 1)} title={t('track.moveDown')}>
               <ChevronDown className="h-3 w-3" />
             </button>
           </div>
@@ -81,7 +84,7 @@ export const TrackRow = memo(function TrackRow({ track, pxPerMs }: Props) {
               step={0.01}
               value={track.volume ?? 1}
               className={`${slider} ${track.kind === 'video' ? 'accent-sky-500' : 'accent-emerald-500'}`}
-              title={`Track volume — ${Math.round((track.volume ?? 1) * 100)}%`}
+              title={t('track.volume', { pct: Math.round((track.volume ?? 1) * 100) })}
               onPointerDown={beginGesture}
               onPointerUp={endGesture}
               onChange={(e) => updateTrack(track.id, { volume: Number(e.target.value) })}
@@ -95,7 +98,7 @@ export const TrackRow = memo(function TrackRow({ track, pxPerMs }: Props) {
                 step={0.01}
                 value={track.opacity ?? 1}
                 className={`${slider} accent-zinc-400`}
-                title={`Track opacity — ${Math.round((track.opacity ?? 1) * 100)}%`}
+                title={t('track.opacity', { pct: Math.round((track.opacity ?? 1) * 100) })}
                 onPointerDown={beginGesture}
                 onPointerUp={endGesture}
                 onChange={(e) => updateTrack(track.id, { opacity: Number(e.target.value) })}

@@ -3,7 +3,7 @@ import { Clip, Project, clipEndMs, clipEnvelopeGainAt, isTextClip, trackCrossfad
 export interface ScheduledSource {
   source: AudioBufferSourceNode;
   gain: GainNode;
-  /** Every node of the clip chain (gain, mono downmix, panner) — disconnected on stop. */
+  /** Every node of the clip chain (gain, mono downmix, panner) - disconnected on stop. */
   nodes: AudioNode[];
 }
 

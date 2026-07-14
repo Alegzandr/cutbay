@@ -1,4 +1,4 @@
-export type AspectRatio = '16:9' | '9:16';
+export type AspectRatio = '16:9' | '9:16' | '1:1' | '4:5';
 
 export interface Project {
   id: string;
@@ -17,7 +17,7 @@ export interface Marker {
 }
 
 /**
- * Timeline selection — the Vegas "yellow corners". Drives loop playback and
+ * Timeline selection - the Vegas "yellow corners". Drives loop playback and
  * can restrict an export to that span. Session state, not project data.
  */
 export interface LoopRegion {
@@ -25,7 +25,7 @@ export interface LoopRegion {
   endMs: number;
 }
 
-/** Markers in timeline order — the order that numbers them (1, 2, 3…). */
+/** Markers in timeline order - the order that numbers them (1, 2, 3…). */
 export function sortedMarkers(project: Project): Marker[] {
   return [...(project.markers ?? [])].sort((a, b) => a.timeMs - b.timeMs);
 }
@@ -75,6 +75,10 @@ export interface ClipText {
   /** Font size as a fraction of the output height (0.08 ≈ lower-third title). */
   sizeFrac: number;
   bold?: boolean;
+  /** Thick dark stroke behind the glyphs — keeps captions readable over footage. */
+  outline?: boolean;
+  /** Rounded dark panel behind each line (caption pill). */
+  background?: boolean;
 }
 
 export interface Clip {
@@ -96,8 +100,27 @@ export interface Clip {
   /** Downmix the clip's audio to mono. */
   mono?: boolean;
   transform?: ClipTransform;
+  /**
+   * Animated zoom (Ken Burns): scale multiplier reached at the END of the
+   * clip, interpolated linearly from 1 at the start. 1/undefined = static.
+   */
+  zoomEnd?: number;
   /** Present on text clips; the clip then renders text instead of media. */
   text?: ClipText;
+}
+
+/**
+ * Zoom-animation multiplier of a clip at a timeline time: ramps 1 → zoomEnd
+ * across the clip. Applied on top of transform.scale everywhere a dest rect
+ * is computed, so preview, hit-testing and export stay in lockstep.
+ */
+export function clipZoomAt(clip: Clip, timelineMs: number): number {
+  const zoomEnd = clip.zoomEnd ?? 1;
+  if (zoomEnd === 1) return 1;
+  const dur = clipDurationMs(clip);
+  if (dur <= 0) return 1;
+  const progress = Math.min(1, Math.max(0, (timelineMs - clip.timelineStartMs) / dur));
+  return 1 + (zoomEnd - 1) * progress;
 }
 
 /** A clip that renders generated text instead of a media asset. */
@@ -195,5 +218,14 @@ export function trackCrossfades(clips: Clip[]): Map<string, CrossfadeWindows> {
 
 /** Output dimensions for an aspect ratio (default export resolution). */
 export function outputDimensions(aspect: AspectRatio): { width: number; height: number } {
-  return aspect === '16:9' ? { width: 1920, height: 1080 } : { width: 1080, height: 1920 };
+  switch (aspect) {
+    case '16:9':
+      return { width: 1920, height: 1080 };
+    case '9:16':
+      return { width: 1080, height: 1920 };
+    case '1:1':
+      return { width: 1080, height: 1080 };
+    case '4:5':
+      return { width: 1080, height: 1350 };
+  }
 }

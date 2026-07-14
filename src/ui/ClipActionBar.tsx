@@ -1,10 +1,12 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Copy, Scissors, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Copy, Scissors, SlidersHorizontal, Trash2, ZoomIn } from 'lucide-react';
 import { useStore, getSelectedClip } from '../store/store';
 import { useIsCoarsePointer } from '../lib/device';
 
 /** Mobile contextual toolbar (CapCut-style): appears when a clip is selected. */
 export function ClipActionBar() {
+  const { t } = useTranslation();
   const coarse = useIsCoarsePointer();
   const clip = useStore(getSelectedClip);
   const inspectorOpen = useStore((s) => s.inspectorOpen);
@@ -25,20 +27,25 @@ export function ClipActionBar() {
         >
           <button className={item} onClick={() => useStore.getState().splitAtPlayhead()}>
             <Scissors className="h-5 w-5" />
-            Split
+            {t('clipbar.split')}
           </button>
           <button className={item} onClick={() => useStore.getState().duplicateClip(clip.id)}>
             <Copy className="h-5 w-5" />
-            Duplicate
+            {t('clipbar.duplicate')}
+          </button>
+          {/* Punch-in: cycle 100 % → 120 % → 140 % → 100 % (the social-cut zoom). */}
+          <button className={item} onClick={() => useStore.getState().punchZoomSelected()}>
+            <ZoomIn className="h-5 w-5" />
+            {t('clipbar.punchIn')}
           </button>
           <button className={item} onClick={() => useStore.getState().setInspectorOpen(true)}>
             <SlidersHorizontal className="h-5 w-5" />
-            Adjust
+            {t('clipbar.adjust')}
           </button>
           {/* CapCut semantics on touch: deleting a clip closes the gap it leaves. */}
           <button className={item} onClick={() => useStore.getState().rippleDeleteClip(clip.id)}>
             <Trash2 className="h-5 w-5" />
-            Delete
+            {t('clipbar.delete')}
           </button>
         </motion.div>
       )}

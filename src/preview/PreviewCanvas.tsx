@@ -1,8 +1,155 @@
 import { useEffect, useRef } from 'react';
 import { PlaybackEngine } from './PlaybackEngine';
 import { useStore, getSelectedClip } from '../store/store';
-import { Clip, DEFAULT_TRANSFORM, clipEndMs, isTextClip, outputDimensions } from '../types';
+import {
+  Clip,
+  ClipTransform,
+  DEFAULT_TRANSFORM,
+  MediaAsset,
+  clipEndMs,
+  isTextClip,
+  outputDimensions,
+  timelineToSourceMs,
+} from '../types';
 import { DestRect, clipDestRect, clipsAt, textClipRect } from './compositor';
+import { clamp } from '../lib/time';
+
+type CropHandle = 'move' | 'nw' | 'ne' | 'sw' | 'se';
+
+/**
+ * Crop editor: the composited canvas already shows the CROPPED result, so
+ * cropping needs a view of the whole source. This overlay paints the source
+ * frame (nearest thumbnail to the playhead) and lets the crop rectangle be
+ * dragged and resized directly on it, in source-normalized coordinates.
+ */
+function CropOverlay({ clip, asset }: { clip: Clip; asset: MediaAsset }) {
+  const frameRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{
+    handle: CropHandle;
+    startNx: number;
+    startNy: number;
+    orig: ClipTransform['crop'];
+  } | null>(null);
+
+  const tf = clip.transform ?? DEFAULT_TRANSFORM;
+  const crop = tf.crop;
+  const aspect = (asset.width ?? 16) / (asset.height ?? 9);
+
+  // Frame shown under the rectangle: the thumbnail closest to the playhead.
+  const srcMs = timelineToSourceMs(clip, useStore.getState().currentTimeMs);
+  const thumbs = asset.thumbnails;
+  const thumb =
+    thumbs.length > 0
+      ? thumbs[
+          clamp(Math.round((srcMs / asset.durationMs) * (thumbs.length - 1)), 0, thumbs.length - 1)
+        ]
+      : undefined;
+
+  const normPoint = (e: React.PointerEvent) => {
+    const r = frameRef.current!.getBoundingClientRect();
+    return { nx: (e.clientX - r.left) / r.width, ny: (e.clientY - r.top) / r.height };
+  };
+
+  const onDown = (e: React.PointerEvent, handle: CropHandle) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const { nx, ny } = normPoint(e);
+    useStore.getState().beginGesture();
+    drag.current = { handle, startNx: nx, startNy: ny, orig: { ...crop } };
+  };
+
+  const onMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    const { nx, ny } = normPoint(e);
+    const dx = nx - d.startNx;
+    const dy = ny - d.startNy;
+    const o = d.orig;
+    const MIN = 0.05;
+    let next: ClipTransform['crop'];
+
+    if (d.handle === 'move') {
+      next = {
+        ...o,
+        x: clamp(o.x + dx, 0, 1 - o.w),
+        y: clamp(o.y + dy, 0, 1 - o.h),
+      };
+    } else {
+      // Corner resize: the opposite corner stays pinned.
+      const left = d.handle === 'nw' || d.handle === 'sw';
+      const top = d.handle === 'nw' || d.handle === 'ne';
+      const right = o.x + o.w;
+      const bottom = o.y + o.h;
+      const nxC = clamp(left ? o.x + dx : right + dx, 0, 1);
+      const nyC = clamp(top ? o.y + dy : bottom + dy, 0, 1);
+      const x = left ? Math.min(nxC, right - MIN) : o.x;
+      const y = top ? Math.min(nyC, bottom - MIN) : o.y;
+      const w = left ? right - x : Math.max(MIN, nxC - o.x);
+      const h = top ? bottom - y : Math.max(MIN, nyC - o.y);
+      next = { x, y, w: Math.min(w, 1 - x), h: Math.min(h, 1 - y) };
+    }
+    useStore.getState().updateClip(clip.id, { transform: { ...tf, crop: next } });
+  };
+
+  const onUp = () => {
+    if (!drag.current) return;
+    useStore.getState().endGesture();
+    drag.current = null;
+  };
+
+  const handleCls =
+    'pointer-events-auto absolute h-3.5 w-3.5 rounded-sm border border-zinc-900 bg-amber-300 shadow touch-none';
+
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/85">
+      <div
+        ref={frameRef}
+        className="relative max-h-full max-w-full touch-none"
+        style={{ aspectRatio: `${aspect}`, width: '100%' }}
+      >
+        {thumb ? (
+          <img src={thumb} className="h-full w-full object-fill opacity-70" alt="" draggable={false} />
+        ) : (
+          <div className="h-full w-full bg-zinc-800" />
+        )}
+
+        {/* The crop rectangle, in source-normalized coordinates. */}
+        <div
+          className="absolute cursor-move touch-none ring-2 ring-amber-300"
+          style={{
+            left: `${crop.x * 100}%`,
+            top: `${crop.y * 100}%`,
+            width: `${crop.w * 100}%`,
+            height: `${crop.h * 100}%`,
+            boxShadow: '0 0 0 9999px rgba(9,9,11,0.6)',
+          }}
+          onPointerDown={(e) => onDown(e, 'move')}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+        >
+          {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+            <div
+              key={corner}
+              className={`${handleCls} ${corner[0] === 'n' ? '-top-1.5' : '-bottom-1.5'} ${
+                corner[1] === 'w' ? '-left-1.5' : '-right-1.5'
+              } ${corner === 'nw' || corner === 'se' ? 'cursor-nwse-resize' : 'cursor-nesw-resize'}`}
+              onPointerDown={(e) => onDown(e, corner)}
+              onPointerMove={onMove}
+              onPointerUp={onUp}
+              onPointerCancel={onUp}
+            />
+          ))}
+        </div>
+
+        <span className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-full bg-zinc-900/90 px-2.5 py-1 text-[11px] text-amber-200">
+          Drag the rectangle to crop the source
+        </span>
+      </div>
+    </div>
+  );
+}
 
 interface PreviewDrag {
   clipId: string;
@@ -11,6 +158,16 @@ interface PreviewDrag {
   origX: number;
   origY: number;
   moved: boolean;
+}
+
+interface PreviewResize {
+  clipId: string;
+  origScale: number;
+  /** Center of the clip's dest rect, normalized to the stage. */
+  centerNx: number;
+  centerNy: number;
+  /** Pointer distance from the center when the drag started. */
+  startDist: number;
 }
 
 /**
@@ -23,14 +180,20 @@ export function PreviewCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const drag = useRef<PreviewDrag | null>(null);
+  const resize = useRef<PreviewResize | null>(null);
   const wheelGesture = useRef<number | null>(null);
 
   const project = useStore((s) => s.project);
   const assets = useStore((s) => s.assets);
   const currentTimeMs = useStore((s) => s.currentTimeMs);
   const selectedClip = useStore(getSelectedClip);
+  const cropEditing = useStore((s) => s.cropEditing);
 
   const { width: outW, height: outH } = outputDimensions(project.aspectRatio);
+
+  // Crop mode only makes sense for a media clip whose source we can show.
+  const cropAsset = selectedClip && !isTextClip(selectedClip) ? assets[selectedClip.assetId] : undefined;
+  const croppingClip = cropEditing && selectedClip && cropAsset ? selectedClip : null;
 
   useEffect(() => {
     const engine = new PlaybackEngine(canvasRef.current!);
@@ -43,7 +206,7 @@ export function PreviewCanvas() {
     const asset = assets[clip.assetId];
     // The dest rect only depends on the source aspect ratio, known from the probe.
     if (!asset?.width || !asset?.height) return null;
-    return clipDestRect(clip, asset.width, asset.height, outW, outH);
+    return clipDestRect(clip, asset.width, asset.height, outW, outH, currentTimeMs);
   };
 
   /** Topmost visible clip under a normalized point at the current time. */
@@ -70,6 +233,8 @@ export function PreviewCanvas() {
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    // The crop overlay owns the pointer while it is up.
+    if (croppingClip) return;
     const { nx, ny } = normPoint(e);
     const clip = hitTest(nx, ny);
     if (!clip) return;
@@ -106,6 +271,44 @@ export function PreviewCanvas() {
     drag.current = null;
   };
 
+  /** Corner handle drag: rescale the clip around its center. */
+  const onHandleDown = (e: React.PointerEvent, rect: DestRect, clip: Clip) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const state = useStore.getState();
+    state.beginGesture();
+    const { nx, ny } = normPoint(e);
+    const centerNx = (rect.dx + rect.dw / 2) / outW;
+    const centerNy = (rect.dy + rect.dh / 2) / outH;
+    resize.current = {
+      clipId: clip.id,
+      origScale: (clip.transform ?? DEFAULT_TRANSFORM).scale,
+      centerNx,
+      centerNy,
+      startDist: Math.max(0.01, Math.hypot(nx - centerNx, ny - centerNy)),
+    };
+  };
+
+  const onHandleMove = (e: React.PointerEvent) => {
+    const r = resize.current;
+    if (!r) return;
+    const { nx, ny } = normPoint(e);
+    const dist = Math.hypot(nx - r.centerNx, ny - r.centerNy);
+    const scale = Math.min(8, Math.max(0.05, (r.origScale * dist) / r.startDist));
+    const state = useStore.getState();
+    const clip = state.project.tracks.flatMap((t) => t.clips).find((c) => c.id === r.clipId);
+    if (!clip) return;
+    const tf = clip.transform ?? DEFAULT_TRANSFORM;
+    state.updateClip(r.clipId, { transform: { ...tf, scale } });
+  };
+
+  const onHandleUp = () => {
+    if (!resize.current) return;
+    useStore.getState().endGesture();
+    resize.current = null;
+  };
+
   // Wheel over the preview scales the selected clip. Native listener: React's
   // onWheel is passive, and scaling must preventDefault to not scroll the page.
   useEffect(() => {
@@ -114,7 +317,7 @@ export function PreviewCanvas() {
     const onWheel = (e: WheelEvent) => {
       const state = useStore.getState();
       const clip = getSelectedClip(state);
-      if (!clip) return;
+      if (!clip || state.cropEditing) return;
       e.preventDefault();
       if (wheelGesture.current === null) state.beginGesture();
       else window.clearTimeout(wheelGesture.current);
@@ -130,8 +333,10 @@ export function PreviewCanvas() {
     return () => stage.removeEventListener('wheel', onWheel);
   }, []);
 
-  // Selection outline: only when the selected clip is actually on screen now.
+  // Selection outline: only when the selected clip is actually on screen now
+  // (and not while the crop overlay covers the stage).
   const selectedRect =
+    !croppingClip &&
     selectedClip &&
     currentTimeMs >= selectedClip.timelineStartMs &&
     currentTimeMs < clipEndMs(selectedClip) &&
@@ -153,6 +358,7 @@ export function PreviewCanvas() {
         onPointerCancel={onPointerUp}
       >
         <canvas ref={canvasRef} className="h-full w-full rounded-lg shadow-lg shadow-black/50" />
+        {croppingClip && cropAsset && <CropOverlay clip={croppingClip} asset={cropAsset} />}
         {selectedRect && (
           <div
             className="pointer-events-none absolute rounded-sm ring-2 ring-sky-400/90"
@@ -162,7 +368,23 @@ export function PreviewCanvas() {
               width: `${(selectedRect.dw / outW) * 100}%`,
               height: `${(selectedRect.dh / outH) * 100}%`,
             }}
-          />
+          >
+            {/* Corner handles: drag to rescale the clip around its center. */}
+            {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+              <div
+                key={corner}
+                className={`pointer-events-auto absolute h-3 w-3 rounded-sm border border-zinc-900 bg-sky-400 shadow ${
+                  corner[0] === 'n' ? '-top-1.5' : '-bottom-1.5'
+                } ${corner[1] === 'w' ? '-left-1.5' : '-right-1.5'} ${
+                  corner === 'nw' || corner === 'se' ? 'cursor-nwse-resize' : 'cursor-nesw-resize'
+                } touch-none`}
+                onPointerDown={(e) => onHandleDown(e, selectedRect, selectedClip!)}
+                onPointerMove={onHandleMove}
+                onPointerUp={onHandleUp}
+                onPointerCancel={onHandleUp}
+              />
+            ))}
+          </div>
         )}
       </div>
     </div>

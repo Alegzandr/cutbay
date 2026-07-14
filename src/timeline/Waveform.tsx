@@ -18,7 +18,7 @@ export const Waveform = memo(function Waveform({ asset, clip, widthPx, color }: 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !peaks?.length) return;
-    // Full-resolution canvas (one bar per screen pixel) — a CSS-stretched
+    // Full-resolution canvas (one bar per screen pixel) - a CSS-stretched
     // low-res canvas reads as a blurry blob, not a waveform.
     const w = Math.max(16, Math.min(30000, Math.round(widthPx)));
     const h = 64;
@@ -31,7 +31,7 @@ export const Waveform = memo(function Waveform({ asset, clip, widthPx, color }: 
     const durMs = clipDurationMs(clip);
     for (let x = 0; x < w; x++) {
       // Same progress fraction drives the source sample (peaks) and the clip-local
-      // time (fade envelope) — the clip's on-screen width *is* its timeline duration.
+      // time (fade envelope) - the clip's on-screen width *is* its timeline duration.
       // Everything here is independent of timelineStartMs, so moving a clip
       // along the timeline never triggers a repaint.
       const t = (x + 0.5) / w;

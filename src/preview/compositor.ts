@@ -1,5 +1,5 @@
 import type { VideoSample } from 'mediabunny';
-import { Clip, ClipText, DEFAULT_TRANSFORM, clipEnvelopeGainAt } from '../types';
+import { Clip, ClipText, DEFAULT_TRANSFORM, clipEnvelopeGainAt, clipZoomAt } from '../types';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -14,12 +14,21 @@ export interface DestRect {
  * Destination rectangle of a clip in the output, from the source dimensions
  * and the clip transform (crop → "contain" fit → user scale, centered on x/y).
  * Shared by drawing, preview hit-testing and the selection overlay.
+ * `timelineMs` applies the animated zoom (Ken Burns); omit for the static rect.
  */
-export function clipDestRect(clip: Clip, srcW: number, srcH: number, outW: number, outH: number): DestRect {
+export function clipDestRect(
+  clip: Clip,
+  srcW: number,
+  srcH: number,
+  outW: number,
+  outH: number,
+  timelineMs?: number,
+): DestRect {
   const t = clip.transform ?? DEFAULT_TRANSFORM;
+  const zoom = timelineMs !== undefined ? clipZoomAt(clip, timelineMs) : 1;
   const cropW = Math.max(1, t.crop.w * srcW);
   const cropH = Math.max(1, t.crop.h * srcH);
-  const fit = Math.min(outW / cropW, outH / cropH) * t.scale;
+  const fit = Math.min(outW / cropW, outH / cropH) * t.scale * zoom;
   const dw = cropW * fit;
   const dh = cropH * fit;
   return { dx: t.x * outW - dw / 2, dy: t.y * outH - dh / 2, dw, dh };
@@ -55,7 +64,7 @@ export function drawClipSample(
   const sy = t.crop.y * sh;
   const cropW = Math.max(1, t.crop.w * sw);
   const cropH = Math.max(1, t.crop.h * sh);
-  const { dx, dy, dw, dh } = clipDestRect(clip, sw, sh, outW, outH);
+  const { dx, dy, dw, dh } = clipDestRect(clip, sw, sh, outW, outH, timelineMs);
 
   ctx.globalAlpha = alpha;
   sample.draw(ctx, sx, sy, cropW, cropH, dx, dy, dw, dh);
@@ -96,15 +105,43 @@ export function drawTextClip(
   ctx.font = font;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  // Soft shadow so light text stays readable over light footage.
-  ctx.shadowColor = 'rgba(0,0,0,0.55)';
-  ctx.shadowBlur = px * 0.12;
-  ctx.shadowOffsetY = px * 0.03;
-  ctx.fillStyle = text.color;
   const cx = t.x * outW;
   const cy = t.y * outH;
+  const lineY = (i: number) => cy + (i - (lines.length - 1) / 2) * lineHeight;
+
+  // Caption pill: rounded dark panel behind each line.
+  if (text.background) {
+    const padX = px * 0.35;
+    const padY = px * 0.14;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i]) continue;
+      const w = ctx.measureText(lines[i]).width;
+      const y = lineY(i);
+      ctx.beginPath();
+      ctx.roundRect(cx - w / 2 - padX, y - px / 2 - padY, w + padX * 2, px + padY * 2, px * 0.25);
+      ctx.fill();
+    }
+  } else {
+    // Soft shadow so light text stays readable over light footage.
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = px * 0.12;
+    ctx.shadowOffsetY = px * 0.03;
+  }
+
+  // Thick dark stroke under the fill (the classic caption outline).
+  if (text.outline) {
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(1.5, px * 0.16);
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+    for (let i = 0; i < lines.length; i++) {
+      ctx.strokeText(lines[i], cx, lineY(i));
+    }
+  }
+
+  ctx.fillStyle = text.color;
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], cx, cy + (i - (lines.length - 1) / 2) * lineHeight);
+    ctx.fillText(lines[i], cx, lineY(i));
   }
   ctx.restore();
 }
@@ -130,12 +167,16 @@ export function textClipRect(clip: Clip, outW: number, outH: number): DestRect {
   measureCtx!.font = font;
   let dw = 0;
   for (const line of lines) dw = Math.max(dw, measureCtx!.measureText(line).width);
-  const dh = lines.length * px * 1.2;
+  let dh = lines.length * px * 1.2;
+  if (text.background) {
+    dw += px * 0.7;
+    dh += px * 0.28;
+  }
   return { dx: t.x * outW - dw / 2, dy: t.y * outH - dh / 2, dw, dh };
 }
 
 /**
- * Clips of a track visible at time t, in draw order (earliest start first —
+ * Clips of a track visible at time t, in draw order (earliest start first -
  * the later clip composites over the earlier one during a crossfade).
  * A legal layout has at most two (pairwise overlaps only).
  */

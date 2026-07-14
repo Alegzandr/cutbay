@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Trans, useTranslation } from 'react-i18next';
 import { CheckCircle2, Download, Loader2, X, XCircle } from 'lucide-react';
 import { useStore } from '../store/store';
 import { formatTime } from '../lib/time';
@@ -13,6 +14,7 @@ type Phase =
   | { kind: 'error'; message: string };
 
 export function ExportSheet() {
+  const { t } = useTranslation();
   const open = useStore((s) => s.exportOpen);
   const aspectRatio = useStore((s) => s.project.aspectRatio);
   const region = useStore((s) => s.loopRegion);
@@ -31,6 +33,20 @@ export function ExportSheet() {
     setPhase({ kind: 'idle' });
     useStore.getState().setExportOpen(false);
   };
+
+  // Escape closes the sheet - except mid-render, where closing would silently
+  // throw away the export (cancel stays an explicit button press).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      if (phase.kind !== 'rendering') close();
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, phase.kind]);
 
   const run = (preset: ExportPreset) => {
     const { project, assets } = useStore.getState();
@@ -75,7 +91,7 @@ export function ExportSheet() {
             className="fixed inset-x-0 bottom-0 z-50 space-y-3 rounded-t-2xl border-t border-zinc-800 bg-zinc-900 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:inset-x-auto md:left-1/2 md:bottom-8 md:w-[26rem] md:-translate-x-1/2 md:rounded-2xl md:border"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-zinc-100">Export</h2>
+              <h2 className="text-sm font-semibold text-zinc-100">{t('export.title')}</h2>
               <button className="rounded-lg p-1.5 text-zinc-400 active:bg-zinc-800" onClick={close}>
                 <X className="h-4 w-4" />
               </button>
@@ -90,8 +106,10 @@ export function ExportSheet() {
                       className={`block w-full rounded-xl border p-3 text-left ${selected.id === preset.id ? 'border-sky-500 bg-sky-500/10' : 'border-zinc-800 bg-zinc-950 active:bg-zinc-800'}`}
                       onClick={() => setSelectedId(preset.id)}
                     >
-                      <div className="text-sm font-medium text-zinc-100">{preset.label}</div>
-                      <div className="mt-0.5 text-xs text-zinc-500">{preset.description}</div>
+                      <div className="text-sm font-medium text-zinc-100">{t(preset.labelKey)}</div>
+                      <div className="mt-0.5 text-xs text-zinc-500">
+                        {t(preset.descriptionKey, { fps: preset.fps })}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -104,7 +122,7 @@ export function ExportSheet() {
                       onChange={(e) => setRegionOnly(e.target.checked)}
                       className="h-3.5 w-3.5 accent-amber-400"
                     />
-                    Render the selected region only —{' '}
+                    {t('export.regionOnly')}{' '}
                     <span className="font-mono text-amber-200">
                       {formatTime(region.startMs)} → {formatTime(region.endMs)}
                     </span>
@@ -116,12 +134,11 @@ export function ExportSheet() {
                   onClick={() => run(selected)}
                 >
                   <Download className="h-4 w-4" />
-                  Export {selected.label}
-                  {exportedRegion ? ' (region)' : ''}
+                  {t(exportedRegion ? 'export.cta.region' : 'export.cta', {
+                    preset: t(selected.labelKey),
+                  })}
                 </button>
-                <p className="text-center text-[11px] text-zinc-600">
-                  Everything renders on your device — nothing is uploaded.
-                </p>
+                <p className="text-center text-[11px] text-zinc-600">{t('export.privacy')}</p>
               </>
             )}
 
@@ -129,7 +146,7 @@ export function ExportSheet() {
               <div className="space-y-3 py-2">
                 <div className="flex items-center gap-2 text-sm text-zinc-300">
                   <Loader2 className="h-4 w-4 animate-spin text-sky-400" />
-                  Rendering… {Math.round(phase.progress * 100)}%
+                  {t('export.rendering', { pct: Math.round(phase.progress * 100) })}
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
                   <div
@@ -145,7 +162,7 @@ export function ExportSheet() {
                     setPhase({ kind: 'idle' });
                   }}
                 >
-                  Cancel
+                  {t('export.cancel')}
                 </button>
               </div>
             )}
@@ -154,20 +171,25 @@ export function ExportSheet() {
               <div className="space-y-3 py-2 text-center">
                 <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-400" />
                 <p className="text-sm text-zinc-200">
-                  Saved as <span className="font-mono text-xs">{phase.filename}</span>
+                  {/* The file name keeps its monospace styling, hence <Trans>. */}
+                  <Trans
+                    i18nKey="export.saved"
+                    values={{ filename: phase.filename }}
+                    components={{ name: <span className="font-mono text-xs" /> }}
+                  />
                 </p>
                 <div className="flex gap-2">
                   <button
                     className="flex-1 rounded-xl border border-zinc-700 py-2 text-sm text-zinc-300 active:bg-zinc-800"
                     onClick={() => downloadBlob(phase.blob, phase.filename)}
                   >
-                    Download again
+                    {t('export.downloadAgain')}
                   </button>
                   <button
                     className="flex-1 rounded-xl bg-sky-500 py-2 text-sm font-semibold text-white active:bg-sky-600"
                     onClick={() => setPhase({ kind: 'idle' })}
                   >
-                    New export
+                    {t('export.newExport')}
                   </button>
                 </div>
               </div>
@@ -176,12 +198,13 @@ export function ExportSheet() {
             {phase.kind === 'error' && (
               <div className="space-y-3 py-2 text-center">
                 <XCircle className="mx-auto h-8 w-8 text-red-400" />
+                {/* Already translated by the exporter, worker codes included. */}
                 <p className="text-sm text-red-300">{phase.message}</p>
                 <button
                   className="w-full rounded-xl border border-zinc-700 py-2 text-sm text-zinc-300 active:bg-zinc-800"
                   onClick={() => setPhase({ kind: 'idle' })}
                 >
-                  Back
+                  {t('export.back')}
                 </button>
               </div>
             )}

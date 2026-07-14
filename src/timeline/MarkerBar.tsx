@@ -1,4 +1,5 @@
 import { memo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/store';
 import { Marker, sortedMarkers } from '../types';
 import { collectSnapPoints, snapTime } from './snapping';
@@ -41,11 +42,12 @@ type Drag = RegionDrag | MarkerDrag;
 
 /**
  * Vegas-style bar above the ruler: drag it to carve a loop region (the yellow
- * corners), and hold the timeline's markers. The region is session state — it
- * drives loop playback and can restrict the export — while markers are project
+ * corners), and hold the timeline's markers. The region is session state - it
+ * drives loop playback and can restrict the export - while markers are project
  * data (undoable, saved).
  */
 export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number }) {
+  const { t } = useTranslation();
   const padLeft = useStore((s) => s.timelinePadLeft);
   const region = useStore((s) => s.loopRegion);
   const loopEnabled = useStore((s) => s.loopEnabled);
@@ -73,7 +75,7 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
     return value;
   };
 
-  // Empty bar: start a fresh region. A press that never moves is a plain click — it clears it.
+  // Empty bar: start a fresh region. A press that never moves is a plain click - it clears it.
   const onBarPointerDown = (e: React.PointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     const el = e.currentTarget as HTMLElement;
@@ -158,7 +160,7 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
       data-marker-bar
       className="sticky top-0 z-20 touch-none border-b border-zinc-800 bg-zinc-900"
       style={{ height: MARKER_BAR_HEIGHT_PX }}
-      title="Drag to select a region · double-click a marker to rename · right-click to delete"
+      title={t('marker.barHint')}
       onPointerDown={onBarPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -173,7 +175,7 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
           <div
             className={`${handle} rounded-l-sm`}
             style={{ left: xOf(region.startMs) }}
-            title="Region in point (I)"
+            title={t('marker.regionIn')}
             onPointerDown={(e) => onHandlePointerDown(e, 'in')}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -182,7 +184,7 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
           <div
             className={`${handle} rounded-r-sm`}
             style={{ left: xOf(region.endMs) - 10 }}
-            title="Region out point (O)"
+            title={t('marker.regionOut')}
             onPointerDown={(e) => onHandlePointerDown(e, 'out')}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -196,7 +198,11 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
           key={marker.id}
           className="absolute top-0 z-10 flex h-full max-w-[160px] cursor-grab touch-none items-center gap-1 rounded-r-sm border-l-2 border-cyan-400 bg-cyan-500/25 pl-1 pr-1.5 text-[10px] leading-none text-cyan-100 active:cursor-grabbing"
           style={{ left: xOf(marker.timeMs) }}
-          title={`Marker ${i + 1}${marker.label ? ` — ${marker.label}` : ''} (double-click to rename, right-click to delete)`}
+          title={
+            marker.label
+              ? t('marker.titleLabeled', { n: i + 1, label: marker.label })
+              : t('marker.title', { n: i + 1 })
+          }
           onPointerDown={(e) => onMarkerPointerDown(e, marker)}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -219,7 +225,9 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
         <input
           autoFocus
           defaultValue={editing.label}
-          placeholder={`Marker ${markers.findIndex((m) => m.id === editing.id) + 1}`}
+          placeholder={t('marker.placeholder', {
+            n: markers.findIndex((m) => m.id === editing.id) + 1,
+          })}
           className="absolute top-0 z-20 h-full w-32 rounded-sm border border-cyan-400 bg-zinc-950 px-1 text-[10px] text-cyan-100 outline-none"
           style={{ left: xOf(editing.timeMs) }}
           onPointerDown={(e) => e.stopPropagation()}
@@ -237,7 +245,7 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
 
 /**
  * Region shading and marker lines drawn across the tracks. Purely decorative
- * (pointer-events-none) — every interaction lives in the bar above.
+ * (pointer-events-none) - every interaction lives in the bar above.
  */
 export const TimelineOverlay = memo(function TimelineOverlay({
   pxPerMs,

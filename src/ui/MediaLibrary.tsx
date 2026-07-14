@@ -1,30 +1,52 @@
-import { Film, FolderOpen, Music, Plus, Trash2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
+import { Film, FolderOpen, Music, Plus, Trash2, X } from 'lucide-react';
 import { useStore } from '../store/store';
 import { MediaAsset } from '../types';
 import { formatTimeShort } from '../lib/time';
 import { ASSET_DRAG_MIME } from '../app/config';
+import { useIsCoarsePointer } from '../lib/device';
 
 /**
  * Source explorer: every imported file lands here. From here assets are
  * placed on the timeline (append to the first matching track) or removed
- * (which also removes their clips).
+ * (which also removes their clips). Desktop: docked column. Mobile: a
+ * drawer (screen space goes to the preview and the timeline).
  */
 export function MediaLibrary() {
+  const { t } = useTranslation();
   const assets = useStore((s) => s.assets);
+  const coarse = useIsCoarsePointer();
+  const libraryOpen = useStore((s) => s.libraryOpen);
   const list = Object.values(assets);
 
-  return (
-    <aside className="flex w-36 flex-none flex-col border-r border-zinc-800 bg-zinc-900/60 md:w-56">
+  const body = (
+    <>
       <div className="flex h-8 flex-none items-center gap-1.5 border-b border-zinc-800 px-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
         <FolderOpen className="h-3.5 w-3.5" />
-        Media
-        {list.length > 0 && <span className="ml-auto font-normal text-zinc-500">{list.length}</span>}
+        {t('library.title')}
+        {/* Bare count badge: no unit to translate, but it needs a spoken label. */}
+        {list.length > 0 && (
+          <span
+            className="ml-auto font-normal text-zinc-500"
+            aria-label={t('library.count', { count: list.length })}
+          >
+            {list.length}
+          </span>
+        )}
+        {coarse && (
+          <button
+            className="-mr-1 rounded p-1 text-zinc-400 active:bg-zinc-800"
+            onClick={() => useStore.getState().setLibraryOpen(false)}
+            title={t('library.close')}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {list.length === 0 ? (
-        <p className="p-3 text-[11px] leading-relaxed text-zinc-500">
-          Imported files appear here. Use Import or drop files anywhere.
-        </p>
+        <p className="p-3 text-[11px] leading-relaxed text-zinc-500">{t('library.empty')}</p>
       ) : (
         <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-1.5">
           {list.map((asset) => (
@@ -32,11 +54,45 @@ export function MediaLibrary() {
           ))}
         </div>
       )}
-    </aside>
+    </>
+  );
+
+  if (!coarse) {
+    return (
+      <aside className="flex w-56 flex-none flex-col border-r border-zinc-800 bg-zinc-900/60">
+        {body}
+      </aside>
+    );
+  }
+
+  return (
+    <AnimatePresence>
+      {libraryOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-40 bg-black/50"
+            onClick={() => useStore.getState().setLibraryOpen(false)}
+          />
+          <motion.aside
+            initial={{ x: '-105%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '-105%' }}
+            transition={{ type: 'spring', damping: 30, stiffness: 380 }}
+            className="fixed inset-y-0 left-0 z-40 flex w-44 flex-col border-r border-zinc-800 bg-zinc-900 pt-[env(safe-area-inset-top)] shadow-2xl shadow-black"
+          >
+            {body}
+          </motion.aside>
+        </>
+      )}
+    </AnimatePresence>
   );
 }
 
 function AssetCard({ asset }: { asset: MediaAsset }) {
+  const { t } = useTranslation();
   const { addClipFromAsset, removeAsset } = useStore.getState();
   const isVideo = asset.kind === 'video';
 
@@ -72,15 +128,19 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
         </span>
         <button
           className="flex-none rounded p-1 text-zinc-500 active:bg-zinc-800 active:text-red-400"
-          title="Remove from library"
+          title={t('library.remove')}
           onClick={() => removeAsset(asset.id)}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
         <button
           className="flex-none rounded bg-sky-500/15 p-1 text-sky-300 active:bg-sky-500/30"
-          title="Add to timeline"
-          onClick={() => addClipFromAsset(asset.id)}
+          title={t('library.add')}
+          onClick={() => {
+            addClipFromAsset(asset.id);
+            // Mobile drawer: close it so the freshly placed clip is visible.
+            useStore.getState().setLibraryOpen(false);
+          }}
         >
           <Plus className="h-3.5 w-3.5" />
         </button>

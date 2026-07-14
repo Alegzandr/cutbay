@@ -9,7 +9,7 @@ import { MediaAsset } from '../types';
 
 /**
  * Decoding resource cache for the preview side (main thread).
- * Export uses its own Inputs inside the worker — the two pipelines share nothing.
+ * Export uses its own Inputs inside the worker - the two pipelines share nothing.
  */
 
 const inputs = new Map<string, Input>();
@@ -111,7 +111,7 @@ export function getPeaks(asset: MediaAsset): Promise<number[] | null> {
 }
 
 /**
- * Compute peaks by streaming decoded chunks — never materializes the full
+ * Compute peaks by streaming decoded chunks - never materializes the full
  * AudioBuffer, so hour-long footage works without a 100s-of-MB allocation.
  */
 async function streamPeaks(asset: MediaAsset): Promise<number[] | null> {

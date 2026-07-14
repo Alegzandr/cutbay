@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { Plus } from 'lucide-react';
 import { useStore, projectDurationMs } from '../store/store';
 import { TrackRow } from './TrackRow';
@@ -10,6 +11,7 @@ import { useImport } from '../ui/useImport';
 import { useIsCoarsePointer } from '../lib/device';
 
 export function Timeline() {
+  const { t } = useTranslation();
   const project = useStore((s) => s.project);
   const pxPerSec = useStore((s) => s.pxPerSec);
   const importing = useStore((s) => s.importing);
@@ -196,15 +198,13 @@ export function Timeline() {
         onDrop={onAssetDrop}
       >
         <p className="text-sm text-zinc-500">
-          {importing
-            ? 'Importing…'
-            : 'Drop video or audio files here, then add them from the media library.'}
+          {importing ? t('timeline.importing') : t('timeline.dropzone.title')}
         </p>
         <label className="cursor-pointer rounded-lg bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-200 active:bg-zinc-700">
-          Choose files
+          {t('timeline.dropzone.choose')}
           <input
             type="file"
-            accept="video/*,audio/*"
+            accept="video/*,audio/*,.srt,.vtt"
             multiple
             className="hidden"
             onChange={(e) => {
@@ -213,6 +213,16 @@ export function Timeline() {
             }}
           />
         </label>
+        {!coarse && !importing && (
+          <p className="text-xs text-zinc-600">
+            {/* One sentence, one key: the <kbd> keycaps are markup inside the translation,
+                so translators keep control of the word order around them. */}
+            <Trans
+              i18nKey="timeline.hint"
+              components={{ kbd: <kbd className="font-mono text-zinc-500" /> }}
+            />
+          </p>
+        )}
       </div>
     );
   }
@@ -264,14 +274,14 @@ export function Timeline() {
               onClick={() => addTrack('video')}
             >
               <Plus className="mr-1 inline h-3 w-3" />
-              Video track
+              {t('timeline.addVideoTrack')}
             </button>
             <button
               className="rounded-md border border-dashed border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 active:bg-zinc-800"
               onClick={() => addTrack('audio')}
             >
               <Plus className="mr-1 inline h-3 w-3" />
-              Audio track
+              {t('timeline.addAudioTrack')}
             </button>
           </div>
 

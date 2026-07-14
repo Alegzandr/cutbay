@@ -25,7 +25,7 @@ interface TrackBus {
 /**
  * Non-blocking video frame cursor for one clip. Requests are coalesced:
  * if a decode is in flight, only the latest requested time is kept
- * (frames are dropped rather than queued — important on mobile).
+ * (frames are dropped rather than queued - important on mobile).
  *
  * Two access modes:
  * - sequential (playback): frames come from a `samples()` async iterator,
@@ -188,7 +188,7 @@ export class PlaybackEngine {
   private lastProject: Project;
   private anchorCtxTime = 0;
   private anchorMediaMs = 0;
-  /** Shuttle rate captured at the last (re)start — timeline advances at ctx-time × rate. */
+  /** Shuttle rate captured at the last (re)start - timeline advances at ctx-time × rate. */
   private rate = 1;
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -355,7 +355,7 @@ export class PlaybackEngine {
 
   private draw(state: EditorState, tMs: number): void {
     const { width, height } = outputDimensions(state.project.aspectRatio);
-    // Preview renders at half resolution — plenty for on-screen display.
+    // Preview renders at half resolution - plenty for on-screen display.
     const w = width / 2;
     const h = height / 2;
     if (this.canvas.width !== w || this.canvas.height !== h) {
@@ -367,7 +367,7 @@ export class PlaybackEngine {
     this.ctx.fillRect(0, 0, w, h);
 
     // Track order defines z-order: the last video track draws on top. Within
-    // a track, an overlapping pair draws earliest-first — the incoming clip
+    // a track, an overlapping pair draws earliest-first - the incoming clip
     // composites over the outgoing one with rising alpha (crossfade).
     for (const track of state.project.tracks) {
       if (track.kind !== 'video' || track.hidden) continue;
@@ -436,7 +436,7 @@ export class PlaybackEngine {
         this.cursors.delete(clipId);
       }
     }
-    // Decoded audio of assets no longer on the timeline can be large — drop it.
+    // Decoded audio of assets no longer on the timeline can be large - drop it.
     for (const assetId of [...this.audioBuffers.keys()]) {
       if (!liveAssetIds.has(assetId)) this.audioBuffers.delete(assetId);
     }

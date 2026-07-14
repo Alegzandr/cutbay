@@ -8,7 +8,7 @@ interface Props {
 /**
  * Desktop playhead: positioned at the current time, draggable, paged into view
  * while playing. Positioned via a direct DOM transform from a store
- * subscription — at 60 updates/sec during playback, going through React
+ * subscription - at 60 updates/sec during playback, going through React
  * reconciliation (and a layout-invalidating `left`) is pure overhead.
  */
 export function Playhead({ scrollerRef }: Props) {

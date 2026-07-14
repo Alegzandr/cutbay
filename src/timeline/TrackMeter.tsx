@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { subscribeLevels } from '../preview/meterBus';
 
 /** Meter floor: -48 dBFS maps to an empty bar, 0 dBFS to a full one. */
@@ -10,6 +11,7 @@ const MIN_DB = -48;
  * animation frame during playback.
  */
 export function TrackMeter({ trackId }: { trackId: string }) {
+  const { t } = useTranslation();
   const barRef = useRef<HTMLDivElement>(null);
   const clipDotRef = useRef<HTMLDivElement>(null);
   const clipUntil = useRef(0);
@@ -34,7 +36,7 @@ export function TrackMeter({ trackId }: { trackId: string }) {
   }, [trackId]);
 
   return (
-    <div className="flex h-1.5 w-full items-center gap-0.5" title="Level (dB) — red dot = clipping">
+    <div className="flex h-1.5 w-full items-center gap-0.5" title={t('track.meter.title')}>
       <div className="h-full min-w-0 flex-1 overflow-hidden rounded-sm bg-zinc-800">
         <div ref={barRef} className="h-full w-0 rounded-sm" />
       </div>

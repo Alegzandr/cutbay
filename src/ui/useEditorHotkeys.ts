@@ -4,7 +4,7 @@ import { zoomAtPlayhead, zoomToFit } from '../timeline/zoom';
 
 /**
  * Jump to the previous/next edit point (clip edges, markers, region corners,
- * origin, project end) — Vegas-style.
+ * origin, project end) - Vegas-style.
  */
 function jumpToEdge(dir: -1 | 1) {
   const s = useStore.getState();
@@ -78,6 +78,10 @@ export function useEditorHotkeys() {
       const s = useStore.getState();
       const mod = e.ctrlKey || e.metaKey;
 
+      // Export dialog open: the timeline must go inert - a stray Space or
+      // Delete must not edit behind the modal. The sheet handles Escape itself.
+      if (s.exportOpen) return;
+
       if (e.code === 'Space') {
         e.preventDefault();
         s.setPlaying(!s.playing);
@@ -116,6 +120,14 @@ export function useEditorHotkeys() {
               e.preventDefault();
               s.duplicateClip(s.selectedClipId);
             }
+            return;
+          case 'a':
+            e.preventDefault();
+            s.selectAllClips();
+            return;
+          case 'e':
+            e.preventDefault();
+            s.setExportOpen(true);
             return;
           case 'arrowleft':
             e.preventDefault();
@@ -213,6 +225,12 @@ export function useEditorHotkeys() {
           return;
         case 'm':
           s.addMarkerAtPlayhead();
+          return;
+        case 'p':
+          s.punchZoomSelected();
+          return;
+        case 'n':
+          s.toggleSnap();
           return;
         case 'z':
           if (e.shiftKey) zoomToFit();

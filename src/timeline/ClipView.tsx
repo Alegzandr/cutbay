@@ -1,4 +1,5 @@
 import { memo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Music, Type } from 'lucide-react';
 import { Clip, MediaAsset, clipDurationMs } from '../types';
 import { useStore } from '../store/store';
@@ -85,6 +86,7 @@ export const ClipView = memo(function ClipView({
   xfadeInMs = 0,
   xfadeOutMs = 0,
 }: Props) {
+  const { t } = useTranslation();
   const asset = useStore((s) => s.assets[clip.assetId]);
   const padLeft = useStore((s) => s.timelinePadLeft);
   const coarse = useIsCoarsePointer();
@@ -146,8 +148,9 @@ export const ClipView = memo(function ClipView({
 
     const state = useStore.getState();
     const pxMs = state.pxPerSec / 1000;
-    // Alt disables snapping (standard NLE behavior for fine placement).
-    const snapThresholdMs = e.altKey ? 0 : SNAP_THRESHOLD_PX / pxMs;
+    // N toggles snapping globally; Alt inverts it for the current drag.
+    const snapActive = e.altKey ? !state.snapEnabled : state.snapEnabled;
+    const snapThresholdMs = snapActive ? SNAP_THRESHOLD_PX / pxMs : 0;
 
     if (d.mode === 'move') {
       const raw = d.origStartMs + dx / pxMs;
@@ -227,13 +230,13 @@ export const ClipView = memo(function ClipView({
         <div className="pointer-events-none flex h-full w-full items-center gap-1 bg-gradient-to-b from-violet-900/60 to-violet-950 px-1.5">
           <Type className="h-3 w-3 flex-none text-violet-300" />
           <span className="truncate text-[11px] font-medium text-violet-100">
-            {clip.text.content.split('\n')[0] || 'Texte'}
+            {clip.text.content.split('\n')[0] || t('clip.text.placeholder')}
           </span>
         </div>
       ) : isVideo && asset?.thumbnails.length ? (
         <div className="pointer-events-none h-full w-full">
           <Filmstrip asset={asset} clip={clip} widthPx={width} />
-          {/* Audio envelope under the thumbnails — cutting to sound needs to be visual. */}
+          {/* Audio envelope under the thumbnails - cutting to sound needs to be visual. */}
           {asset.peaks && (
             <div className="absolute inset-x-0 bottom-0 h-1/3 bg-black/40">
               <Waveform asset={asset} clip={clip} widthPx={width} color="rgba(255,255,255,0.85)" />
@@ -325,7 +328,7 @@ export const ClipView = memo(function ClipView({
           <div
             className={`absolute top-0 z-10 -translate-x-1/2 cursor-ew-resize touch-none rounded-full border border-zinc-900 bg-amber-300 shadow ${coarse ? 'h-4 w-4' : 'h-3 w-3'}`}
             style={{ left: clamp(clip.fadeInMs * pxPerMs, 6, Math.max(6, width / 2)) }}
-            title="Fade in"
+            title={t('clip.fadeIn')}
             onPointerDown={(e) => beginDrag(e, 'fade-in')}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -334,7 +337,7 @@ export const ClipView = memo(function ClipView({
           <div
             className={`absolute top-0 z-10 -translate-x-1/2 cursor-ew-resize touch-none rounded-full border border-zinc-900 bg-amber-300 shadow ${coarse ? 'h-4 w-4' : 'h-3 w-3'}`}
             style={{ left: clamp(width - clip.fadeOutMs * pxPerMs, Math.min(width - 6, width / 2), width - 6) }}
-            title="Fade out"
+            title={t('clip.fadeOut')}
             onPointerDown={(e) => beginDrag(e, 'fade-out')}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}

@@ -1,6 +1,6 @@
-# Cutbay
+# SelfCut
 
-A 100% client-side video editor. No backend, no upload — your media never leaves the device. Decoding, compositing and encoding all happen in the browser through **WebCodecs** and **[mediabunny](https://mediabunny.dev)**.
+A 100% client-side video editor. No backend, no upload - your media never leaves the device. Decoding, compositing and encoding all happen in the browser through **WebCodecs** and **[mediabunny](https://mediabunny.dev)**.
 
 ```bash
 npm i
@@ -21,16 +21,16 @@ Requires a browser with WebCodecs (recent Chrome/Edge, Safari 16.4+). A clean ex
 - 16:9 ↔ 9:16 toggle: preview and export presets reconfigure
 - Real-time preview with synchronized audio
 - Export presets:
-  - **YouTube 16:9** — 1920×1080 @ 60, H.264 ~12 Mbps, AAC 192 kbps, MP4 fast start
-  - **TikTok 9:16** — 1080×1920 @ 60, H.264 ~10 Mbps, AAC 192 kbps, MP4 fast start
-  - **MP3** — full mix, 320 kbps
+  - **YouTube 16:9** - 1920×1080 @ 60, H.264 ~12 Mbps, AAC 192 kbps, MP4 fast start
+  - **TikTok 9:16** - 1080×1920 @ 60, H.264 ~10 Mbps, AAC 192 kbps, MP4 fast start
+  - **MP3** - full mix, 320 kbps
 
 ## Architecture
 
 Two strictly separate pipelines:
 
-1. **Preview (real time)** — `src/preview/`. A `requestAnimationFrame` loop draws the visible video frames for the current time onto a canvas (crop, position, scale, `globalAlpha` for fades, black background). Audio goes through a Web Audio graph: one `GainNode` per clip (volume + fade ramps), `playbackRate` for speed. Frames may be dropped on slower devices — audio stays the clock.
-2. **Export (offline, in a Web Worker)** — `src/export/exportWorker.ts`. Iterates frame by frame at 60 fps (`PROJECT_FPS`), maps output time to source time, decodes with mediabunny `Input` + `VideoSampleSink`, composites on an `OffscreenCanvas`, pushes into a `CanvasSource` (H.264). The audio mix is rendered on the main thread with an `OfflineAudioContext` (Web Audio is unavailable in workers), transferred to the worker as raw channels and encoded there (AAC for MP4, MP3 for the MP3 preset). Muxing via `Output` + `Mp4OutputFormat`/`Mp3OutputFormat` with fast start; progress is posted back and the resulting Blob is downloaded.
+1. **Preview (real time)** - `src/preview/`. A `requestAnimationFrame` loop draws the visible video frames for the current time onto a canvas (crop, position, scale, `globalAlpha` for fades, black background). Audio goes through a Web Audio graph: one `GainNode` per clip (volume + fade ramps), `playbackRate` for speed. Frames may be dropped on slower devices - audio stays the clock.
+2. **Export (offline, in a Web Worker)** - `src/export/exportWorker.ts`. Iterates frame by frame at 60 fps (`PROJECT_FPS`), maps output time to source time, decodes with mediabunny `Input` + `VideoSampleSink`, composites on an `OffscreenCanvas`, pushes into a `CanvasSource` (H.264). The audio mix is rendered on the main thread with an `OfflineAudioContext` (Web Audio is unavailable in workers), transferred to the worker as raw channels and encoded there (AAC for MP4, MP3 for the MP3 preset). Muxing via `Output` + `Mp4OutputFormat`/`Mp3OutputFormat` with fast start; progress is posted back and the resulting Blob is downloaded.
 
 AAC/MP3 encoders are feature-detected (`canEncodeAudio`); when the native WebCodecs encoder is missing, `@mediabunny/aac-encoder` / `@mediabunny/mp3-encoder` (WASM) are registered as fallbacks.
 
@@ -54,14 +54,14 @@ src/
 
 ## Decisions made along the way
 
-- **`Cutbay` is a constant** — `APP_NAME` in `src/app/config.ts`.
+- **`SelfCut` is a constant** - `APP_NAME` in `src/app/config.ts`.
 - **Undo/redo** snapshots the whole project (small plain object). Drag gestures are wrapped in a transaction (`beginGesture`/`endGesture`) so one drag = one history entry. History capped at 50 entries.
 - **Import goes to the media library**, not straight to the timeline. From the library, "Add to timeline" appends the asset at the end of the first track of the matching kind (created if needed). Removing an asset also removes its clips; if an undo later restores clips whose asset is gone, they simply render nothing (all asset lookups are guarded).
 - **Overlaps are allowed** within a track; at a given time the latest-starting clip wins. Keeping it permissive avoids fighting the user during drags.
 - **Track reordering** uses up/down buttons in the track header (simpler and more reliable than vertical drag on mobile).
 - **Transform semantics**: crop is normalized over the source; the cropped region is "contain"-fitted into the output, then scaled by `scale` and centered at (`x`, `y`) in normalized output coordinates. Default = centered, fit, no crop.
 - **Wheel = zoom** on the timeline (anchored at the cursor); horizontal panning via drag/trackpad/scrollbar. Pinch zoom on touch.
-- **Preview renders at half the export resolution** — sharp on screen, cheaper to composite.
+- **Preview renders at half the export resolution** - sharp on screen, cheaper to composite.
 - **Audio decode strategy**: each asset's audio track is decoded once into a full `AudioBuffer` (memoized). Simple and instant to schedule; the trade-off is memory (~23 MB per stereo minute), fine for short-form editing this MVP targets.
 - **Speed does not preserve pitch** (plain `playbackRate`), as scoped.
 - **Video-with-audio clips** carry their own audio; dedicated audio tracks host audio files. Splitting audio from a video clip is out of scope for v1.
@@ -75,16 +75,16 @@ Text/titles, filters, transitions other than fades, keyframes, HDR, pitch preser
 
 The repo ships with `.github/workflows/deploy.yml`: on every push to `main` it builds (`npm ci && npm run build`) and publishes `dist/` via `actions/upload-pages-artifact` + `actions/deploy-pages`.
 
-1. Push the repo to GitHub under the name **`cutbay`**.
+1. Push the repo to GitHub under the name **`selfcut`**.
 2. In **Settings → Pages**, set **Source** to **GitHub Actions**.
-3. Push to `main` — the site appears at `https://<user>.github.io/cutbay/`.
+3. Push to `main` - the site appears at `https://<user>.github.io/selfcut/`.
 
 If your repo has a different name, change `BASE_PATH` in `vite.config.ts` (or set the `VITE_BASE` env var at build time).
 
 Notes:
 
 - GitHub Pages serves over HTTPS, which satisfies WebCodecs' secure-context requirement.
-- No custom headers are needed — Cutbay uses WebCodecs, not ffmpeg.wasm, so no COOP/COEP.
+- No custom headers are needed - SelfCut uses WebCodecs, not ffmpeg.wasm, so no COOP/COEP.
 - The build copies `index.html` to `404.html` as an SPA fallback.
 
 ## License

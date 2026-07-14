@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import {
   Clip,
+  ClipTransform,
+  DEFAULT_TRANSFORM,
   LoopRegion,
   Marker,
   MediaAsset,
@@ -9,6 +11,7 @@ import {
   AspectRatio,
   clipDurationMs,
   clipEndMs,
+  outputDimensions,
   timelineToSourceMs,
   projectDurationMs,
   sortedMarkers,
@@ -16,6 +19,7 @@ import {
 import { uid } from '../lib/id';
 import { clamp } from '../lib/time';
 import { disposeAssetResources } from '../media/mediaCache';
+import { t } from '../i18n';
 import {
   DEFAULT_PX_PER_SEC,
   MIN_CLIP_DURATION_MS,
@@ -36,12 +40,12 @@ interface ClipboardEntry {
 export interface EditorState {
   project: Project;
   assets: Record<string, MediaAsset>;
-  /** Primary selection (last clicked) — the one the inspector edits. */
+  /** Primary selection (last clicked) - the one the inspector edits. */
   selectedClipId: string | null;
   /** Full selection (multi-select via Ctrl/Cmd+click on desktop). */
   selectedClipIds: string[];
   currentTimeMs: number;
-  /** Incremented on every user seek — the playback engine resyncs to it. */
+  /** Incremented on every user seek - the playback engine resyncs to it. */
   seekVersion: number;
   playing: boolean;
   /** Timeline selection (yellow corners): loop range and optional export range. */
@@ -53,8 +57,12 @@ export interface EditorState {
   pxPerSec: number;
   /** Left padding of the timeline content in px (half the viewport on mobile, fixed on desktop). */
   timelinePadLeft: number;
+  /** Clip-drag snapping (N toggles it; Alt inverts it for the current drag). */
+  snapEnabled: boolean;
   /** Mobile only: the inspector opens on demand (Adjust button), not on every selection. */
   inspectorOpen: boolean;
+  /** Mobile only: the media library lives in a drawer (desktop docks it permanently). */
+  libraryOpen: boolean;
   shortcutsOpen: boolean;
   clipboard: ClipboardEntry | null;
   exportOpen: boolean;
@@ -74,7 +82,7 @@ export interface EditorState {
   /** Insert a generated text clip at the playhead, on a free topmost video track. */
   addTextClip: () => void;
   addTrack: (kind: Track['kind']) => void;
-  /** Live track edit (volume/opacity slider drags) — wrap with begin/endGesture. */
+  /** Live track edit (volume/opacity slider drags) - wrap with begin/endGesture. */
   updateTrack: (trackId: string, patch: Partial<Track>) => void;
   updateTrackCommitted: (trackId: string, patch: Partial<Track>) => void;
   removeTrack: (trackId: string) => void;
@@ -86,12 +94,14 @@ export interface EditorState {
   setAssetThumbnails: (assetId: string, thumbnails: string[]) => void;
 
   selectClip: (id: string | null) => void;
+  /** Ctrl/Cmd+A: every clip on every track. */
+  selectAllClips: () => void;
   /** Ctrl/Cmd+click: add/remove a clip from the multi-selection. */
   toggleSelectClip: (id: string) => void;
   updateClip: (clipId: string, patch: Partial<Clip>) => void;
   updateClipCommitted: (clipId: string, patch: Partial<Clip>) => void;
   moveClip: (clipId: string, timelineStartMs: number, targetTrackId?: string) => void;
-  /** Batch position update (multi-selection drag), no history — wrap with begin/endGesture. */
+  /** Batch position update (multi-selection drag), no history - wrap with begin/endGesture. */
   moveClips: (entries: { clipId: string; timelineStartMs: number }[]) => void;
   trimClip: (clipId: string, edge: 'left' | 'right', timelineMs: number) => void;
   splitAtPlayhead: () => void;
@@ -104,6 +114,27 @@ export interface EditorState {
   copyClip: (clipId: string) => void;
   cutClip: (clipId: string) => void;
   pasteAtPlayhead: () => void;
+  /**
+   * Punch-in zoom (the social-cut staple): cycle the scale of the selected
+   * clip - or the topmost video clip under the playhead - 1 → 1.2 → 1.4 → 1.
+   */
+  punchZoomSelected: () => void;
+  toggleSnap: () => void;
+  /**
+   * Import parsed subtitle cues as caption clips (outlined, lower-third) on a
+   * dedicated topmost video track, one undo step for the whole file.
+   */
+  addSubtitleClips: (cues: { startMs: number; endMs: number; text: string }[]) => void;
+  /**
+   * Stream-clip layout: split the selected clip into a facecam band (top 30%,
+   * cropped to the source's top-left corner by default) over a gameplay band
+   * (bottom 70%, center crop). The duplicate lands on a track above; both
+   * crops are then adjustable per clip (crop edit mode).
+   */
+  applyStreamLayout: (clipId: string) => void;
+  /** Preview crop-edit mode for the selected video clip (session state). */
+  cropEditing: boolean;
+  setCropEditing: (v: boolean) => void;
 
   beginGesture: () => void;
   endGesture: () => void;
@@ -123,7 +154,7 @@ export interface EditorState {
 
   /** Drop a marker at the playhead (no-op if one already sits there). */
   addMarkerAtPlayhead: () => void;
-  /** Live marker drag — wrap with begin/endGesture. */
+  /** Live marker drag - wrap with begin/endGesture. */
   moveMarker: (markerId: string, timeMs: number) => void;
   renameMarker: (markerId: string, label: string) => void;
   removeMarker: (markerId: string) => void;
@@ -134,6 +165,7 @@ export interface EditorState {
   setPxPerSec: (v: number) => void;
   setTimelinePadLeft: (px: number) => void;
   setInspectorOpen: (open: boolean) => void;
+  setLibraryOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setExportOpen: (open: boolean) => void;
   setImporting: (v: boolean) => void;
@@ -145,7 +177,7 @@ function createEmptyProject(): Project {
 }
 
 /**
- * Overlap policy: two consecutive clips on a track MAY overlap — the overlap
+ * Overlap policy: two consecutive clips on a track MAY overlap - the overlap
  * is rendered as a crossfade (Vegas-style transition by sliding a clip over
  * its neighbor). What stays forbidden, with offenders pushed right:
  * - a clip overlapping the clip two positions back (no triple overlap);
@@ -280,7 +312,9 @@ export const useStore = create<EditorState>((set, get) => {
     playbackRate: 1,
     pxPerSec: DEFAULT_PX_PER_SEC,
     timelinePadLeft: TIMELINE_PAD_LEFT,
+    snapEnabled: true,
     inspectorOpen: false,
+    libraryOpen: false,
     shortcutsOpen: false,
     clipboard: null,
     exportOpen: false,
@@ -373,7 +407,7 @@ export const useStore = create<EditorState>((set, get) => {
       const durMs = 3000;
       withHistory((p) => {
         const start = Math.max(0, currentTimeMs);
-        // Topmost video track with the interval free — a text clip is an overlay,
+        // Topmost video track with the interval free - a text clip is an overlay,
         // it must not crossfade with the footage it sits on. Otherwise stack a new track.
         let track = [...p.tracks]
           .reverse()
@@ -398,7 +432,7 @@ export const useStore = create<EditorState>((set, get) => {
           volume: 1,
           fadeInMs: 0,
           fadeOutMs: 0,
-          text: { content: 'Titre', color: '#ffffff', sizeFrac: 0.08, bold: true },
+          text: { content: t('clip.defaultText'), color: '#ffffff', sizeFrac: 0.08, bold: true },
         });
       }, newClipId);
       set({ selectedClipId: newClipId, selectedClipIds: [newClipId] });
@@ -458,8 +492,15 @@ export const useStore = create<EditorState>((set, get) => {
       set({
         selectedClipId: id,
         selectedClipIds: id ? [id] : [],
+        // Crop-edit mode is bound to one clip; any selection change ends it.
+        cropEditing: false,
         ...(id === null ? { inspectorOpen: false } : {}),
       }),
+
+    selectAllClips: () => {
+      const ids = get().project.tracks.flatMap((t) => t.clips.map((c) => c.id));
+      set({ selectedClipIds: ids, selectedClipId: ids[ids.length - 1] ?? null });
+    },
 
     toggleSelectClip: (id) => {
       const ids = get().selectedClipIds.includes(id)
@@ -653,11 +694,125 @@ export const useStore = create<EditorState>((set, get) => {
       set({ selectedClipId: newId, selectedClipIds: [newId] });
     },
 
+    punchZoomSelected: () => {
+      const { selectedClipId, currentTimeMs, project } = get();
+      // Fall back to the topmost video clip under the playhead, so the
+      // J/K/L → S → P flow works without ever touching the mouse.
+      let targetId = selectedClipId;
+      if (!targetId) {
+        for (const track of [...project.tracks].reverse()) {
+          if (track.kind !== 'video') continue;
+          const hit = track.clips.find(
+            (c) => currentTimeMs >= c.timelineStartMs && currentTimeMs < clipEndMs(c),
+          );
+          if (hit) {
+            targetId = hit.id;
+            break;
+          }
+        }
+      }
+      if (!targetId) return;
+      withHistory((p) => {
+        const found = findClip(p, targetId!);
+        if (!found) return;
+        const tf = found.clip.transform ?? structuredClone(DEFAULT_TRANSFORM);
+        const next = tf.scale < 1.1 ? 1.2 : tf.scale < 1.3 ? 1.4 : 1;
+        found.clip.transform = { ...tf, scale: next };
+      }, targetId);
+      set({ selectedClipId: targetId, selectedClipIds: [targetId] });
+    },
+
+    toggleSnap: () => set({ snapEnabled: !get().snapEnabled }),
+
+    addSubtitleClips: (cues) => {
+      if (cues.length === 0) return;
+      withHistory((p) => {
+        // Captions always live on their own topmost video track, above any
+        // footage or title tracks.
+        const track: Track = { id: uid('track'), kind: 'video', clips: [] };
+        p.tracks.unshift(track);
+        for (const cue of cues) {
+          track.clips.push({
+            id: uid('clip'),
+            assetId: '',
+            trackId: track.id,
+            timelineStartMs: cue.startMs,
+            sourceInMs: 0,
+            sourceOutMs: Math.max(MIN_CLIP_DURATION_MS, cue.endMs - cue.startMs),
+            speed: 1,
+            volume: 1,
+            fadeInMs: 0,
+            fadeOutMs: 0,
+            // Caption defaults: outlined, slightly smaller than a title,
+            // lower-third position (y 0.82).
+            transform: { ...structuredClone(DEFAULT_TRANSFORM), y: 0.82 },
+            text: { content: cue.text, color: '#ffffff', sizeFrac: 0.05, bold: true, outline: true },
+          });
+        }
+      }, null);
+    },
+
+    applyStreamLayout: (clipId) => {
+      const state = get();
+      const found = findClip(state.project, clipId);
+      const asset = found ? state.assets[found.clip.assetId] : undefined;
+      if (!found || found.track.kind !== 'video' || !asset?.width || !asset?.height) return;
+      const { width: outW, height: outH } = outputDimensions(state.project.aspectRatio);
+      const srcW = asset.width;
+      const srcH = asset.height;
+
+      /** Transform that makes `crop` COVER a zone centered at (cx,cy), sized w×h (output px). */
+      const coverZone = (
+        crop: ClipTransform['crop'],
+        cx: number,
+        cy: number,
+        w: number,
+        h: number,
+      ): ClipTransform => {
+        const cropW = Math.max(1, crop.w * srcW);
+        const cropH = Math.max(1, crop.h * srcH);
+        const fit = Math.min(outW / cropW, outH / cropH);
+        const scale = Math.max(w / (cropW * fit), h / (cropH * fit));
+        return { crop, x: cx / outW, y: cy / outH, scale };
+      };
+
+      // Facecam: top-left corner of the source by default (adjust in crop mode).
+      const camCrop = { x: 0, y: 0, w: 0.3, h: 0.35 };
+      // Gameplay: centered band matching the bottom zone's aspect ratio.
+      const zoneH = outH * 0.7;
+      const gameW = Math.min(1, (outW / zoneH) * (srcH / srcW));
+      const gameCrop = { x: (1 - gameW) / 2, y: 0, w: gameW, h: 1 };
+
+      const camClipId = uid('clip');
+      withHistory((p) => {
+        const inner = findClip(p, clipId);
+        if (!inner) return;
+        // Gameplay stays on its track, filling the bottom zone.
+        inner.clip.transform = coverZone(gameCrop, outW / 2, outH * 0.3 + zoneH / 2, outW, zoneH);
+        // Facecam duplicate on a NEW track above (captions/titles keep their own).
+        const camTrack: Track = { id: uid('track'), kind: 'video', clips: [] };
+        const idx = p.tracks.findIndex((t) => t.id === inner.track.id);
+        p.tracks.splice(idx, 0, camTrack);
+        camTrack.clips.push({
+          ...structuredClone(inner.clip),
+          id: camClipId,
+          trackId: camTrack.id,
+          // The facecam layer is a picture layer: it must not add audio on top.
+          volume: 0,
+          transform: coverZone(camCrop, outW / 2, (outH * 0.3) / 2, outW, outH * 0.3),
+        });
+      }, clipId);
+      set({ selectedClipId: camClipId, selectedClipIds: [camClipId], cropEditing: true });
+    },
+
+    cropEditing: false,
+    setCropEditing: (v) => set({ cropEditing: v }),
+
     beginGesture: () => set({ gestureSnapshot: get().project }),
 
     endGesture: () => {
       // Settle any illegal overlap created during the gesture (drag/trim);
-      // legal pairwise overlaps are kept — they are crossfades.
+      // legal pairwise overlaps are kept - they are crossfades.
       const settled = resolveOverlaps(get().project, get().selectedClipId);
       if (settled !== get().project) set({ project: settled });
       const { gestureSnapshot, project, past } = get();
@@ -823,6 +978,7 @@ export const useStore = create<EditorState>((set, get) => {
     },
 
     setInspectorOpen: (open) => set({ inspectorOpen: open }),
+    setLibraryOpen: (open) => set({ libraryOpen: open }),
     setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
 
     setExportOpen: (open) => set({ exportOpen: open }),

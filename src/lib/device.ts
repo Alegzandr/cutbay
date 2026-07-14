@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 const QUERY = '(pointer: coarse)';
 
-/** True on touch-first devices (phones/tablets) — drives the CapCut-style timeline mode. */
+/** True on touch-first devices (phones/tablets) - drives the CapCut-style timeline mode. */
 export function useIsCoarsePointer(): boolean {
   const [coarse, setCoarse] = useState(() => window.matchMedia(QUERY).matches);
   useEffect(() => {
