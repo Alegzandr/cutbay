@@ -384,6 +384,7 @@ export const useStore = create<EditorState>((set, get) => {
         const track = ensureTrack(p, asset.kind);
         const start = track.clips.reduce((max, c) => Math.max(max, clipEndMs(c)), 0);
         const clip: Clip = {
+          kind: 'media',
           id: uid('clip'),
           assetId,
           trackId: track.id,
@@ -409,6 +410,7 @@ export const useStore = create<EditorState>((set, get) => {
       withHistory((p) => {
         const track = ensureTrack(p, asset.kind, targetTrackId);
         track.clips.push({
+          kind: 'media',
           id: newClipId,
           assetId,
           trackId: track.id,
@@ -445,6 +447,7 @@ export const useStore = create<EditorState>((set, get) => {
           p.tracks.splice(lastVideoIdx + 1, 0, track);
         }
         track.clips.push({
+          kind: 'text',
           id: newClipId,
           assetId: '',
           trackId: track.id,
@@ -480,6 +483,7 @@ export const useStore = create<EditorState>((set, get) => {
           p.tracks.splice(lastVideoIdx + 1, 0, track);
         }
         track.clips.push({
+          kind: 'solid',
           id: newClipId,
           assetId: '',
           trackId: track.id,
@@ -576,7 +580,12 @@ export const useStore = create<EditorState>((set, get) => {
 
     updateClip: (clipId, patch) =>
       set({
-        project: patchClips(get().project, new Map([[clipId, (c: Clip) => ({ ...c, ...patch })]])),
+        // The spread preserves the clip's discriminant `kind`; the cast tells TS
+        // the patched object is still a valid Clip (a Partial<Clip> spread widens).
+        project: patchClips(
+          get().project,
+          new Map([[clipId, (c: Clip): Clip => ({ ...c, ...patch }) as Clip]]),
+        ),
       }),
 
     updateClipCommitted: (clipId, patch) =>
@@ -795,6 +804,7 @@ export const useStore = create<EditorState>((set, get) => {
         p.tracks.push(track);
         for (const cue of cues) {
           track.clips.push({
+            kind: 'text',
             id: uid('clip'),
             assetId: '',
             trackId: track.id,

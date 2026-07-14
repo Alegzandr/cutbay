@@ -91,9 +91,10 @@ export interface ClipSolid {
   angle?: number;
 }
 
-export interface Clip {
+/** Fields shared by every clip, whatever it renders. */
+interface BaseClip {
   id: string;
-  /** Empty string for generated clips (text) that have no media asset. */
+  /** Empty string for generated clips (text/solid) that have no media asset. */
   assetId: string;
   trackId: string;
   timelineStartMs: number;
@@ -115,11 +116,30 @@ export interface Clip {
    * clip, interpolated linearly from 1 at the start. 1/undefined = static.
    */
   zoomEnd?: number;
-  /** Present on text clips; the clip then renders text instead of media. */
-  text?: ClipText;
-  /** Present on solid clips; the clip then renders a full-frame fill instead of media. */
-  solid?: ClipSolid;
 }
+
+/** A clip backed by an imported media asset (video or audio). */
+export interface MediaClip extends BaseClip {
+  kind: 'media';
+}
+
+/** A generated clip that renders text instead of media. */
+export interface TextClip extends BaseClip {
+  kind: 'text';
+  text: ClipText;
+}
+
+/** A generated clip that renders a full-frame colour or gradient. */
+export interface SolidClip extends BaseClip {
+  kind: 'solid';
+  solid: ClipSolid;
+}
+
+/**
+ * Discriminated on `kind`: `text` exists only on a TextClip and `solid` only on
+ * a SolidClip, so a narrowed clip needs no non-null assertion to read them.
+ */
+export type Clip = MediaClip | TextClip | SolidClip;
 
 /**
  * Zoom-animation multiplier of a clip at a timeline time: ramps 1 → zoomEnd
@@ -136,13 +156,13 @@ export function clipZoomAt(clip: Clip, timelineMs: number): number {
 }
 
 /** A clip that renders generated text instead of a media asset. */
-export function isTextClip(clip: Clip): boolean {
-  return clip.text != null;
+export function isTextClip(clip: Clip): clip is TextClip {
+  return clip.kind === 'text';
 }
 
-/** A clip with no backing media asset. */
-export function isGeneratedClip(clip: Clip): boolean {
-  return clip.text != null || clip.solid != null;
+/** A clip with no backing media asset (text or solid). */
+export function isGeneratedClip(clip: Clip): clip is TextClip | SolidClip {
+  return clip.kind !== 'media';
 }
 
 export const DEFAULT_TRANSFORM: ClipTransform = {

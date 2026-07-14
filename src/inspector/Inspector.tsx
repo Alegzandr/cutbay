@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Crop, LayoutPanelTop, RotateCcw, Trash2, X } from 'lucide-react';
 import { useStore, getSelectedClip } from '../store/store';
 import { Tooltip } from '../ui/Tooltip';
-import { Clip, ClipTransform, DEFAULT_TRANSFORM } from '../types';
+import { Clip, ClipSolid, ClipText, ClipTransform, SolidClip, TextClip, DEFAULT_TRANSFORM } from '../types';
 import { useIsCoarsePointer } from '../lib/device';
 import i18n from '../i18n';
 
@@ -123,7 +123,7 @@ export function Inspector() {
           clip={clip}
           isVideo={asset?.kind === 'video'}
           hasAudio={asset?.hasAudio ?? false}
-          name={clip.text ? t('inspector.textClip') : clip.solid ? t(`inspector.solid.${clip.solid.kind}`) : asset?.file.name ?? ''}
+          name={clip.kind === 'text' ? t('inspector.textClip') : clip.kind === 'solid' ? t(`inspector.solid.${clip.solid.kind}`) : asset?.file.name ?? ''}
         />
       </div>
     );
@@ -145,7 +145,7 @@ export function Inspector() {
             clip={clip}
             isVideo={asset?.kind === 'video'}
             hasAudio={asset?.hasAudio ?? false}
-            name={clip.text ? t('inspector.textClip') : clip.solid ? t(`inspector.solid.${clip.solid.kind}`) : asset?.file.name ?? ''}
+            name={clip.kind === 'text' ? t('inspector.textClip') : clip.kind === 'solid' ? t(`inspector.solid.${clip.solid.kind}`) : asset?.file.name ?? ''}
           />
         </motion.div>
       )}
@@ -153,11 +153,11 @@ export function Inspector() {
   );
 }
 
-function TextSection({ clip }: { clip: Clip }) {
+function TextSection({ clip }: { clip: TextClip }) {
   const { t } = useTranslation();
   const { updateClip, beginGesture, endGesture } = useStore.getState();
-  const text = clip.text!;
-  const setText = (patch: Partial<NonNullable<Clip['text']>>) =>
+  const text = clip.text;
+  const setText = (patch: Partial<ClipText>) =>
     updateClip(clip.id, { text: { ...text, ...patch } });
 
   return (
@@ -222,11 +222,11 @@ function TextSection({ clip }: { clip: Clip }) {
   );
 }
 
-function SolidSection({ clip }: { clip: Clip }) {
+function SolidSection({ clip }: { clip: SolidClip }) {
   const { t } = useTranslation();
   const { updateClip, beginGesture, endGesture } = useStore.getState();
-  const solid = clip.solid!;
-  const setSolid = (patch: Partial<NonNullable<Clip['solid']>>) =>
+  const solid = clip.solid;
+  const setSolid = (patch: Partial<ClipSolid>) =>
     updateClip(clip.id, { solid: { ...solid, ...patch } });
 
   return (
@@ -276,8 +276,7 @@ function InspectorBody({
     useStore.getState();
   const cropEditing = useStore((s) => s.cropEditing);
   const coarse = useIsCoarsePointer();
-  const isText = clip.text != null;
-  const isSolid = clip.solid != null;
+  const isText = clip.kind === 'text';
   const tf: ClipTransform = clip.transform ?? DEFAULT_TRANSFORM;
   const setTf = (patch: Partial<ClipTransform>) =>
     updateClip(clip.id, { transform: { ...tf, ...patch } });
@@ -313,8 +312,8 @@ function InspectorBody({
         </Tooltip>
       </div>
 
-      {isText && <TextSection clip={clip} />}
-      {isSolid && <SolidSection clip={clip} />}
+      {clip.kind === 'text' && <TextSection clip={clip} />}
+      {clip.kind === 'solid' && <SolidSection clip={clip} />}
 
       {hasAudio && (
         <>

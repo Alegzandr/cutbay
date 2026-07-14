@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { collectSnapPoints, snapTime, snapMove } from './snapping';
-import type { Clip, Project } from '../types';
+import type { MediaClip, Project } from '../types';
 
-function makeClip(over: Partial<Clip> = {}): Clip {
+function makeClip(over: Partial<MediaClip> = {}): MediaClip {
   return {
+    kind: 'media',
     id: 'c1',
     assetId: 'a1',
     trackId: 't1',

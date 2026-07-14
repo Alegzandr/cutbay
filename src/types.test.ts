@@ -12,12 +12,13 @@ import {
   sortedMarkers,
   isTextClip,
   isGeneratedClip,
-  type Clip,
+  type MediaClip,
   type Project,
 } from './types';
 
-function makeClip(over: Partial<Clip> = {}): Clip {
+function makeClip(over: Partial<MediaClip> = {}): MediaClip {
   return {
+    kind: 'media',
     id: 'c1',
     assetId: 'a1',
     trackId: 't1',
@@ -135,8 +136,9 @@ describe('sortedMarkers', () => {
 describe('clip kind guards', () => {
   it('distinguishes text and generated clips', () => {
     const media = makeClip();
-    const text = makeClip({ text: { content: 'hi', color: '#fff', sizeFrac: 0.08 } });
-    const solid = makeClip({ solid: { kind: 'color', color: '#000' } });
+    const { kind: _k, ...base } = makeClip();
+    const text = { ...base, kind: 'text' as const, text: { content: 'hi', color: '#fff', sizeFrac: 0.08 } };
+    const solid = { ...base, kind: 'solid' as const, solid: { kind: 'color' as const, color: '#000' } };
     expect(isTextClip(media)).toBe(false);
     expect(isTextClip(text)).toBe(true);
     expect(isGeneratedClip(media)).toBe(false);

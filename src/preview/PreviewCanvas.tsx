@@ -212,7 +212,7 @@ export function PreviewCanvas() {
   /** Bounding rect of a clip in output coordinates (null when unknown). */
   const rectOf = (clip: Clip): DestRect | null => {
     if (isTextClip(clip)) return textClipRect(clip, outW, outH);
-    if (clip.solid) return { dx: 0, dy: 0, dw: outW, dh: outH };
+    if (clip.kind === 'solid') return { dx: 0, dy: 0, dw: outW, dh: outH };
     const asset = assets[clip.assetId];
     // The dest rect only depends on the source aspect ratio, known from the probe.
     if (!asset?.width || !asset?.height) return null;

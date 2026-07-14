@@ -156,7 +156,7 @@ async function exportMp4(req: ExportRequest, preset: Mp4Preset): Promise<void> {
           drawTextClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs);
           continue;
         }
-        if (clip.solid) {
+        if (clip.kind === 'solid') {
           drawSolidClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs);
           continue;
         }

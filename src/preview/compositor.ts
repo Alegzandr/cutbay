@@ -1,5 +1,5 @@
 import type { VideoSample } from 'mediabunny';
-import { Clip, ClipText, DEFAULT_TRANSFORM, clipEnvelopeGainAt, clipZoomAt } from '../types';
+import { Clip, ClipText, SolidClip, TextClip, DEFAULT_TRANSFORM, clipEnvelopeGainAt, clipZoomAt } from '../types';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -83,7 +83,7 @@ function textFont(text: ClipText, outH: number, scale: number): { font: string; 
  */
 export function drawTextClip(
   ctx: Ctx2D,
-  clip: Clip,
+  clip: TextClip,
   outW: number,
   outH: number,
   timelineMs: number,
@@ -91,7 +91,7 @@ export function drawTextClip(
   xfadeInMs = 0,
 ): void {
   const text = clip.text;
-  if (!text || !text.content) return;
+  if (!text.content) return;
   const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul;
   if (alpha <= 0) return;
 
@@ -149,7 +149,7 @@ export function drawTextClip(
 /** Draw a generated full-frame colour or linear gradient. */
 export function drawSolidClip(
   ctx: Ctx2D,
-  clip: Clip,
+  clip: SolidClip,
   outW: number,
   outH: number,
   timelineMs: number,
@@ -157,7 +157,6 @@ export function drawSolidClip(
   xfadeInMs = 0,
 ): void {
   const solid = clip.solid;
-  if (!solid) return;
   const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul;
   if (alpha <= 0) return;
   ctx.save();
@@ -183,10 +182,10 @@ let measureCtx: Ctx2D | null = null;
  * Bounding box of a text clip in output coordinates (hit-testing and the
  * preview selection overlay). Uses a shared 1×1 measuring context.
  */
-export function textClipRect(clip: Clip, outW: number, outH: number): DestRect {
+export function textClipRect(clip: TextClip, outW: number, outH: number): DestRect {
   const text = clip.text;
   const t = clip.transform ?? DEFAULT_TRANSFORM;
-  if (!text || !text.content) return { dx: t.x * outW, dy: t.y * outH, dw: 0, dh: 0 };
+  if (!text.content) return { dx: t.x * outW, dy: t.y * outH, dw: 0, dh: 0 };
   if (!measureCtx) {
     measureCtx =
       typeof OffscreenCanvas !== 'undefined'

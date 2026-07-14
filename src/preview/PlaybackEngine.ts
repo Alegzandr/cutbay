@@ -390,7 +390,7 @@ export class PlaybackEngine {
           drawTextClip(this.ctx, clip, w, h, tMs, alphaMul, xfadeInMs);
           continue;
         }
-        if (clip.solid) {
+        if (clip.kind === 'solid') {
           drawSolidClip(this.ctx, clip, w, h, tMs, alphaMul, xfadeInMs);
           continue;
         }

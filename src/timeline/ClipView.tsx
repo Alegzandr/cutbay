@@ -230,14 +230,14 @@ export const ClipView = memo(function ClipView({
         if (coarse && !selected) useStore.getState().selectClip(clip.id);
       }}
     >
-      {clip.text ? (
+      {clip.kind === 'text' ? (
         <div className="pointer-events-none flex h-full w-full items-center gap-1 bg-gradient-to-b from-violet-900/60 to-violet-950 px-1.5">
           <Type className="h-3 w-3 flex-none text-violet-300" />
           <span className="truncate text-[11px] font-medium text-violet-100">
             {clip.text.content.split('\n')[0] || t('clip.text.placeholder')}
           </span>
         </div>
-      ) : clip.solid ? (
+      ) : clip.kind === 'solid' ? (
         <div
           className="pointer-events-none flex h-full w-full items-center gap-1 px-1.5"
           style={{
