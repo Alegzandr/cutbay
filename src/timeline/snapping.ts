@@ -1,4 +1,5 @@
-import { LoopRegion, Project, clipEndMs } from '../types';
+import { LoopRegion, Project } from '../types';
+import { clipEndMs } from '../model';
 
 /**
  * All timeline positions worth snapping to: origin, playhead, other clips'
@@ -17,7 +18,7 @@ export function collectSnapPoints(
       points.push(clip.timelineStartMs, clipEndMs(clip));
     }
   }
-  for (const marker of project.markers ?? []) points.push(marker.timeMs);
+  for (const marker of project.markers) points.push(marker.timeMs);
   if (region) points.push(region.startMs, region.endMs);
   return points;
 }

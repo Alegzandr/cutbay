@@ -1,7 +1,8 @@
 import { memo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Music, Type } from 'lucide-react';
-import { Clip, MediaAsset, clipDurationMs } from '../types';
+import { Clip, MediaAsset } from '../types';
+import { clipDurationMs } from '../model';
 import { useStore } from '../store/store';
 import { Tooltip } from '../ui/Tooltip';
 import { collectSnapPoints, snapMove, snapTime } from './snapping';

@@ -2,7 +2,8 @@ import { memo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/store';
 import { Tooltip } from '../ui/Tooltip';
-import { Marker, sortedMarkers } from '../types';
+import { Marker } from '../types';
+import { sortedMarkers } from '../model';
 import { collectSnapPoints, snapTime } from './snapping';
 import { msFromClientX } from './coords';
 import {
@@ -273,7 +274,7 @@ export const TimelineOverlay = memo(function TimelineOverlay({
           }}
         />
       )}
-      {(markers ?? []).map((marker) => (
+      {markers.map((marker) => (
         <div
           key={marker.id}
           className="absolute inset-y-0 w-px bg-cyan-400/40"

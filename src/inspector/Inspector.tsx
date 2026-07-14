@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { Crop, LayoutPanelTop, RotateCcw, Trash2, X } from 'lucide-react';
 import { useStore, getSelectedClip } from '../store/store';
 import { Tooltip } from '../ui/Tooltip';
-import { Clip, ClipSolid, ClipText, ClipTransform, SolidClip, TextClip, DEFAULT_TRANSFORM } from '../types';
+import { Clip, ClipSolid, ClipText, ClipTransform, SolidClip, TextClip } from '../types';
+import { DEFAULT_TRANSFORM } from '../model';
 import { useIsCoarsePointer } from '../lib/device';
 import i18n from '../i18n';
 

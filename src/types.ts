@@ -25,11 +25,6 @@ export interface LoopRegion {
   endMs: number;
 }
 
-/** Markers in timeline order - the order that numbers them (1, 2, 3…). */
-export function sortedMarkers(project: Project): Marker[] {
-  return [...(project.markers ?? [])].sort((a, b) => a.timeMs - b.timeMs);
-}
-
 export interface Track {
   id: string;
   kind: 'video' | 'audio';
@@ -138,131 +133,8 @@ export interface SolidClip extends BaseClip {
 /**
  * Discriminated on `kind`: `text` exists only on a TextClip and `solid` only on
  * a SolidClip, so a narrowed clip needs no non-null assertion to read them.
+ *
+ * The model math (durations, fades, crossfades, output geometry) lives in
+ * `src/model/` — this module is types only.
  */
 export type Clip = MediaClip | TextClip | SolidClip;
-
-/**
- * Zoom-animation multiplier of a clip at a timeline time: ramps 1 → zoomEnd
- * across the clip. Applied on top of transform.scale everywhere a dest rect
- * is computed, so preview, hit-testing and export stay in lockstep.
- */
-export function clipZoomAt(clip: Clip, timelineMs: number): number {
-  const zoomEnd = clip.zoomEnd ?? 1;
-  if (zoomEnd === 1) return 1;
-  const dur = clipDurationMs(clip);
-  if (dur <= 0) return 1;
-  const progress = Math.min(1, Math.max(0, (timelineMs - clip.timelineStartMs) / dur));
-  return 1 + (zoomEnd - 1) * progress;
-}
-
-/** A clip that renders generated text instead of a media asset. */
-export function isTextClip(clip: Clip): clip is TextClip {
-  return clip.kind === 'text';
-}
-
-/** A clip with no backing media asset (text or solid). */
-export function isGeneratedClip(clip: Clip): clip is TextClip | SolidClip {
-  return clip.kind !== 'media';
-}
-
-export const DEFAULT_TRANSFORM: ClipTransform = {
-  crop: { x: 0, y: 0, w: 1, h: 1 },
-  x: 0.5,
-  y: 0.5,
-  scale: 1,
-};
-
-/** Duration of a clip on the timeline, in ms. */
-export function clipDurationMs(clip: Clip): number {
-  return (clip.sourceOutMs - clip.sourceInMs) / clip.speed;
-}
-
-/** End of a clip on the timeline, in ms. */
-export function clipEndMs(clip: Clip): number {
-  return clip.timelineStartMs + clipDurationMs(clip);
-}
-
-/** Source time (ms) corresponding to a timeline time (ms) for a clip. */
-export function timelineToSourceMs(clip: Clip, timelineMs: number): number {
-  return clip.sourceInMs + (timelineMs - clip.timelineStartMs) * clip.speed;
-}
-
-/** Total project duration (end of the last clip), in ms. */
-export function projectDurationMs(project: Project): number {
-  let max = 0;
-  for (const track of project.tracks) {
-    for (const clip of track.clips) {
-      max = Math.max(max, clipEndMs(clip));
-    }
-  }
-  return max;
-}
-
-/** Fade gain of a clip at a given timeline time (0..1), used for both opacity and audio. */
-export function clipFadeGainAt(clip: Clip, timelineMs: number): number {
-  return clipEnvelopeGainAt(clip, timelineMs, 0, 0);
-}
-
-/**
- * Fade gain including crossfade windows (overlap with neighboring clips).
- * A crossfade behaves like an implicit fade of the overlap duration; when the
- * clip also has an explicit fade on the same edge, the longer one wins so the
- * envelope stays a single linear ramp.
- */
-export function clipEnvelopeGainAt(
-  clip: Clip,
-  timelineMs: number,
-  xfadeInMs: number,
-  xfadeOutMs: number,
-): number {
-  const dur = clipDurationMs(clip);
-  const local = timelineMs - clip.timelineStartMs;
-  const fadeIn = Math.max(clip.fadeInMs, xfadeInMs);
-  const fadeOut = Math.max(clip.fadeOutMs, xfadeOutMs);
-  let gain = 1;
-  if (fadeIn > 0) gain = Math.min(gain, local / fadeIn);
-  if (fadeOut > 0) gain = Math.min(gain, (dur - local) / fadeOut);
-  return Math.max(0, Math.min(1, gain));
-}
-
-export interface CrossfadeWindows {
-  /** Overlap with the previous clip on the track (ramp-in duration), ms. */
-  inMs: number;
-  /** Overlap with the next clip on the track (ramp-out duration), ms. */
-  outMs: number;
-}
-
-/**
- * Crossfades of a track, derived purely from clip overlap: when two
- * consecutive clips overlap, the incoming clip ramps in and the outgoing
- * clip ramps out over the shared region (Vegas-style transition by sliding).
- */
-export function trackCrossfades(clips: Clip[]): Map<string, CrossfadeWindows> {
-  const out = new Map<string, CrossfadeWindows>();
-  const sorted = [...clips].sort((a, b) => a.timelineStartMs - b.timelineStartMs);
-  for (const c of sorted) out.set(c.id, { inMs: 0, outMs: 0 });
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1];
-    const cur = sorted[i];
-    const overlap = clipEndMs(prev) - cur.timelineStartMs;
-    if (overlap <= 0) continue;
-    const window = Math.min(overlap, clipDurationMs(prev), clipDurationMs(cur));
-    out.get(prev.id)!.outMs = Math.max(out.get(prev.id)!.outMs, window);
-    out.get(cur.id)!.inMs = Math.max(out.get(cur.id)!.inMs, window);
-  }
-  return out;
-}
-
-/** Output dimensions for an aspect ratio (default export resolution). */
-export function outputDimensions(aspect: AspectRatio): { width: number; height: number } {
-  switch (aspect) {
-    case '16:9':
-      return { width: 1920, height: 1080 };
-    case '9:16':
-      return { width: 1080, height: 1920 };
-    case '1:1':
-      return { width: 1080, height: 1080 };
-    case '4:5':
-      return { width: 1080, height: 1350 };
-  }
-}

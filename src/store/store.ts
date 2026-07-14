@@ -2,20 +2,22 @@ import { create } from 'zustand';
 import {
   Clip,
   ClipTransform,
-  DEFAULT_TRANSFORM,
   LoopRegion,
   Marker,
   MediaAsset,
   Project,
   Track,
   AspectRatio,
+} from '../types';
+import {
+  DEFAULT_TRANSFORM,
   clipDurationMs,
   clipEndMs,
   outputDimensions,
   timelineToSourceMs,
   projectDurationMs,
   sortedMarkers,
-} from '../types';
+} from '../model';
 import { uid } from '../lib/id';
 import { clamp, type TimeFormat } from '../lib/time';
 import { disposeAssetResources } from '../media/mediaCache';
@@ -282,7 +284,7 @@ function ensureTrack(p: Project, kind: Track['kind'], preferredTrackId?: string)
 function findClip(project: Project, clipId: string): { track: Track; clip: Clip; index: number } | null {
   for (const track of project.tracks) {
     const index = track.clips.findIndex((c) => c.id === clipId);
-    if (index !== -1) return { track, clip: track.clips[index], index };
+    if (index !== -1) return { track, clip: track.clips[index]!, index };
   }
   return null;
 }
@@ -526,7 +528,7 @@ export const useStore = create<EditorState>((set, get) => {
         const i = p.tracks.findIndex((t) => t.id === trackId);
         const j = i + dir;
         if (i === -1 || j < 0 || j >= p.tracks.length) return;
-        [p.tracks[i], p.tracks[j]] = [p.tracks[j], p.tracks[i]];
+        [p.tracks[i], p.tracks[j]] = [p.tracks[j]!, p.tracks[i]!];
       }),
 
     toggleTrackMuted: (trackId) =>
@@ -984,7 +986,7 @@ export const useStore = create<EditorState>((set, get) => {
       if (sortedMarkers(project).some((m) => Math.abs(m.timeMs - currentTimeMs) < 1)) return;
       withHistory((p) => {
         p.markers = [
-          ...(p.markers ?? []),
+          ...p.markers,
           { id: uid('marker'), timeMs: Math.max(0, currentTimeMs), label: '' },
         ];
       });
@@ -999,13 +1001,13 @@ export const useStore = create<EditorState>((set, get) => {
 
     renameMarker: (markerId, label) =>
       withHistory((p) => {
-        const marker = p.markers?.find((m) => m.id === markerId);
+        const marker = p.markers.find((m) => m.id === markerId);
         if (marker) marker.label = label;
       }),
 
     removeMarker: (markerId) =>
       withHistory((p) => {
-        p.markers = (p.markers ?? []).filter((m) => m.id !== markerId);
+        p.markers = p.markers.filter((m) => m.id !== markerId);
       }),
 
     hydrate: (project, assets) => {

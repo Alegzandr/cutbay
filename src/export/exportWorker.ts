@@ -15,7 +15,8 @@ import {
 } from 'mediabunny';
 import { registerAacEncoder } from '@mediabunny/aac-encoder';
 import { registerMp3Encoder } from '@mediabunny/mp3-encoder';
-import { Clip, isTextClip, timelineToSourceMs, trackCrossfades } from '../types';
+import { Clip } from '../types';
+import { isTextClip, timelineToSourceMs, trackCrossfades } from '../model';
 import { clipsAt, drawClipSample, drawSolidClip, drawTextClip } from '../preview/compositor';
 import type { Mp4Preset } from './presets';
 import { ExportErrorCode, ExportRequest, WorkerReply } from './protocol';
@@ -226,14 +227,14 @@ async function pushAudioMix(
 ): Promise<void> {
   const { channels, sampleRate } = audio;
   const numberOfChannels = channels.length;
-  const totalFrames = channels[0].length;
+  const totalFrames = channels[0]!.length;
   const chunkFrames = sampleRate;
 
   for (let offset = 0; offset < totalFrames; offset += chunkFrames) {
     const frames = Math.min(chunkFrames, totalFrames - offset);
     const data = new Float32Array(frames * numberOfChannels);
     for (let ch = 0; ch < numberOfChannels; ch++) {
-      data.set(channels[ch].subarray(offset, offset + frames), ch * frames);
+      data.set(channels[ch]!.subarray(offset, offset + frames), ch * frames);
     }
     const sample = new AudioSample({
       data,

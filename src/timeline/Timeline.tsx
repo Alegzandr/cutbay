@@ -92,7 +92,9 @@ export function Timeline() {
       }
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) {
-        const [a, b] = [...pointers.values()];
+        const pts = [...pointers.values()];
+        const a = pts[0]!;
+        const b = pts[1]!;
         pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
         pinchStartPxPerSec = useStore.getState().pxPerSec;
         pinching.current = true;
@@ -102,7 +104,9 @@ export function Timeline() {
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2 && pinchStartDist > 0) {
-        const [a, b] = [...pointers.values()];
+        const pts = [...pointers.values()];
+        const a = pts[0]!;
+        const b = pts[1]!;
         const dist = Math.hypot(a.x - b.x, a.y - b.y);
         useStore.getState().setPxPerSec(pinchStartPxPerSec * (dist / pinchStartDist));
       }

@@ -1,7 +1,8 @@
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Eye, EyeOff, Film, Music2, Trash2, Volume2, VolumeX } from 'lucide-react';
-import { Track, trackCrossfades } from '../types';
+import { Track } from '../types';
+import { trackCrossfades } from '../model';
 import { useStore } from '../store/store';
 import { Tooltip } from '../ui/Tooltip';
 import { useIsCoarsePointer } from '../lib/device';

@@ -24,7 +24,8 @@ export function ExportSheet() {
   const handleRef = useRef<ExportHandle | null>(null);
 
   const presets = presetsForAspect(aspectRatio);
-  const selected = presets.find((p) => p.id === selectedId) ?? presets[0];
+  // presetsForAspect always returns the aspect-agnostic mp3 presets, so it is never empty.
+  const selected = presets.find((p) => p.id === selectedId) ?? presets[0]!;
   const exportedRegion = region && regionOnly ? region : null;
 
   const close = () => {

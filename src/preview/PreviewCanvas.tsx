@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { PlaybackEngine } from './PlaybackEngine';
 import { useStore, getSelectedClip } from '../store/store';
+import { Clip, ClipTransform, MediaAsset } from '../types';
 import {
-  Clip,
-  ClipTransform,
   DEFAULT_TRANSFORM,
-  MediaAsset,
   clipEndMs,
   isTextClip,
   isGeneratedClip,
   outputDimensions,
   timelineToSourceMs,
-} from '../types';
+} from '../model';
 import { DestRect, clipDestRect, clipsAt, textClipRect } from './compositor';
 import { clamp } from '../lib/time';
 
@@ -227,9 +225,10 @@ export function PreviewCanvas() {
       if (track.kind !== 'video' || track.hidden || (track.opacity ?? 1) <= 0) continue;
       const visible = clipsAt(track.clips, currentTimeMs);
       for (let i = visible.length - 1; i >= 0; i--) {
-        const r = rectOf(visible[i]);
+        const clip = visible[i]!;
+        const r = rectOf(clip);
         if (r && px >= r.dx && px <= r.dx + r.dw && py >= r.dy && py <= r.dy + r.dh) {
-          return visible[i];
+          return clip;
         }
       }
     }

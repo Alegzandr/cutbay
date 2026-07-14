@@ -1,14 +1,13 @@
 import type { VideoSample, VideoSampleSink } from 'mediabunny';
 import { useStore, EditorState } from '../store/store';
+import { MediaAsset, Project } from '../types';
 import {
-  MediaAsset,
-  Project,
   isTextClip,
   outputDimensions,
   projectDurationMs,
   timelineToSourceMs,
   trackCrossfades,
-} from '../types';
+} from '../model';
 import { createVideoSink, getAudioBuffer } from '../media/mediaCache';
 import { clipsAt, drawClipSample, drawSolidClip, drawTextClip } from './compositor';
 import { ScheduledSource, scheduleProjectAudio, stopScheduled } from './audioMix';
@@ -419,7 +418,7 @@ export class PlaybackEngine {
         bus.analyser.getFloatTimeDomainData(bus.data);
         let peak = 0;
         for (let i = 0; i < bus.data.length; i++) {
-          const v = Math.abs(bus.data[i]);
+          const v = Math.abs(bus.data[i]!);
           if (v > peak) peak = v;
         }
         levels[trackId] = peak;

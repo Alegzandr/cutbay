@@ -1,5 +1,6 @@
 import type { VideoSample } from 'mediabunny';
-import { Clip, ClipText, SolidClip, TextClip, DEFAULT_TRANSFORM, clipEnvelopeGainAt, clipZoomAt } from '../types';
+import { Clip, ClipText, SolidClip, TextClip } from '../types';
+import { DEFAULT_TRANSFORM, clipEnvelopeGainAt, clipZoomAt } from '../model';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -116,7 +117,7 @@ export function drawTextClip(
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
     for (let i = 0; i < lines.length; i++) {
       if (!lines[i]) continue;
-      const w = ctx.measureText(lines[i]).width;
+      const w = ctx.measureText(lines[i]!).width;
       const y = lineY(i);
       ctx.beginPath();
       ctx.roundRect(cx - w / 2 - padX, y - px / 2 - padY, w + padX * 2, px + padY * 2, px * 0.25);
@@ -135,13 +136,13 @@ export function drawTextClip(
     ctx.lineWidth = Math.max(1.5, px * 0.16);
     ctx.strokeStyle = 'rgba(0,0,0,0.9)';
     for (let i = 0; i < lines.length; i++) {
-      ctx.strokeText(lines[i], cx, lineY(i));
+      ctx.strokeText(lines[i]!, cx, lineY(i));
     }
   }
 
   ctx.fillStyle = text.color;
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], cx, lineY(i));
+    ctx.fillText(lines[i]!, cx, lineY(i));
   }
   ctx.restore();
 }

@@ -12,9 +12,8 @@ import {
   sortedMarkers,
   isTextClip,
   isGeneratedClip,
-  type MediaClip,
-  type Project,
-} from './types';
+} from './model';
+import type { MediaClip, Project } from './types';
 
 function makeClip(over: Partial<MediaClip> = {}): MediaClip {
   return {
