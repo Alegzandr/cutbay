@@ -193,6 +193,10 @@ export class PlaybackEngine {
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
+    // High-quality resampling: scaled frames (crop/zoom/fit) look far cleaner
+    // than the default 'low' bilinear pass.
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = 'high';
     const state = useStore.getState();
     this.lastSeekVersion = state.seekVersion;
     this.lastProject = state.project;
@@ -361,6 +365,9 @@ export class PlaybackEngine {
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
+      // Resizing the backing store resets all context state - re-arm smoothing.
+      this.ctx.imageSmoothingEnabled = true;
+      this.ctx.imageSmoothingQuality = 'high';
     }
 
     this.ctx.fillStyle = '#000';

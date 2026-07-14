@@ -23,6 +23,8 @@ interface DragState {
   lastSnap: number | null;
   /** Multi-selection drag: original start of every clip moving together. */
   groupStarts: Map<string, number>;
+  /** Timeline time (ms) under the pointer at press, to seek on a click without drag. */
+  downMs: number;
 }
 
 interface Props {
@@ -124,6 +126,13 @@ export const ClipView = memo(function ClipView({
         if (groupIds.includes(c.id)) groupStarts.set(c.id, c.timelineStartMs);
       }
     }
+    // Time under the pointer at press: a plain click (no drag) on a clip moves
+    // the playhead there, like a classic NLE.
+    const contentEl = contentOf(e.currentTarget as HTMLElement);
+    const downMs = contentEl
+      ? (e.clientX - contentEl.getBoundingClientRect().left - state.timelinePadLeft) /
+        (state.pxPerSec / 1000)
+      : clip.timelineStartMs;
     drag.current = {
       mode,
       startX: e.clientX,
@@ -135,6 +144,7 @@ export const ClipView = memo(function ClipView({
       moved: false,
       lastSnap: null,
       groupStarts,
+      downMs,
     };
   };
 
@@ -148,8 +158,8 @@ export const ClipView = memo(function ClipView({
 
     const state = useStore.getState();
     const pxMs = state.pxPerSec / 1000;
-    // N toggles snapping globally; Alt inverts it for the current drag.
-    const snapActive = e.altKey ? !state.snapEnabled : state.snapEnabled;
+    // N toggles snapping globally; holding Shift (or Alt) inverts it for the current drag.
+    const snapActive = e.shiftKey || e.altKey ? !state.snapEnabled : state.snapEnabled;
     const snapThresholdMs = snapActive ? SNAP_THRESHOLD_PX / pxMs : 0;
 
     if (d.mode === 'move') {
@@ -200,8 +210,12 @@ export const ClipView = memo(function ClipView({
   };
 
   const onPointerUp = () => {
-    if (!drag.current) return;
-    useStore.getState().endGesture();
+    const d = drag.current;
+    if (!d) return;
+    const state = useStore.getState();
+    state.endGesture();
+    // A click on a clip that didn't turn into a drag moves the playhead there.
+    if (!coarse && !d.moved && d.mode === 'move') state.seek(Math.max(0, d.downMs));
     drag.current = null;
   };
 
@@ -216,6 +230,8 @@ export const ClipView = memo(function ClipView({
 
   return (
     <div
+      data-clip-id={clip.id}
+      data-clip-kind={trackKind}
       className={`absolute top-1 bottom-1 overflow-hidden rounded-md border ${touch} ${border} ${isVideo ? 'bg-sky-950' : 'bg-emerald-950'}`}
       style={{ left, width }}
       onPointerDown={(e) => beginDrag(e, 'move')}
@@ -306,7 +322,8 @@ export const ClipView = memo(function ClipView({
         </>
       )}
 
-      {/* Fade indicators */}
+      {/* Fade ramps: the dark wedge (fade from/to black) plus the classic-NLE
+          ramp line drawn corner-to-top, so the fade is legible at a glance. */}
       {clip.fadeInMs > 0 && (
         <div
           className="pointer-events-none absolute inset-y-0 left-0 bg-gradient-to-r from-black/70 to-transparent"
@@ -319,42 +336,108 @@ export const ClipView = memo(function ClipView({
           style={{ width: clip.fadeOutMs * pxPerMs }}
         />
       )}
+      {(clip.fadeInMs > 0 || clip.fadeOutMs > 0) && (
+        <svg
+          className="pointer-events-none absolute inset-0 h-full w-full"
+          viewBox={`0 0 ${width} 100`}
+          preserveAspectRatio="none"
+        >
+          {clip.fadeInMs > 0 && (
+            <line
+              x1={0}
+              y1={100}
+              x2={clip.fadeInMs * pxPerMs}
+              y2={0}
+              stroke="rgba(251,191,36,0.95)"
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+          {clip.fadeOutMs > 0 && (
+            <line
+              x1={width - clip.fadeOutMs * pxPerMs}
+              y1={0}
+              x2={width}
+              y2={100}
+              stroke="rgba(251,191,36,0.95)"
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+        </svg>
+      )}
 
-      {/* Crossfade regions (overlap with a neighboring clip) */}
+      {/* Crossfade with a neighbor: the overlap window, marked with the ramp of
+          this clip's edge (incoming rises, outgoing falls) — the two neighbors'
+          ramps together read as the classic crossfade "X". */}
       {xfadeInMs > 0 && (
         <div
-          className="pointer-events-none absolute inset-y-0 left-0 border-r border-white/30 bg-gradient-to-r from-white/20 to-transparent"
+          className="pointer-events-none absolute inset-y-0 left-0 border-r border-sky-300/50 bg-sky-300/10"
           style={{ width: xfadeInMs * pxPerMs }}
-        />
+        >
+          <svg className="h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <line
+              x1={0}
+              y1={100}
+              x2={100}
+              y2={0}
+              stroke="rgba(125,211,252,0.9)"
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        </div>
       )}
       {xfadeOutMs > 0 && (
         <div
-          className="pointer-events-none absolute inset-y-0 right-0 border-l border-white/30 bg-gradient-to-l from-white/20 to-transparent"
+          className="pointer-events-none absolute inset-y-0 right-0 border-l border-sky-300/50 bg-sky-300/10"
           style={{ width: xfadeOutMs * pxPerMs }}
-        />
+        >
+          <svg className="h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+            <line
+              x1={0}
+              y1={0}
+              x2={100}
+              y2={100}
+              stroke="rgba(125,211,252,0.9)"
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+        </div>
       )}
 
-      {/* Fade handles: drag from the clip's top corners to fade from/to black */}
+      {/* Fade handles: drag from the clip's top corners to fade from/to black.
+          The interactive box is deliberately larger than the visible dot so the
+          corner is easy to grab; the dot itself sits at the ramp's top. */}
       {selected && (
         <>
           <div
-            className={`absolute top-0 z-10 -translate-x-1/2 cursor-ew-resize touch-none rounded-full border border-zinc-900 bg-amber-300 shadow ${coarse ? 'h-4 w-4' : 'h-3 w-3'}`}
+            className={`absolute top-0 z-10 flex -translate-x-1/2 items-start justify-center cursor-ew-resize touch-none ${coarse ? 'h-8 w-8' : 'h-6 w-6'}`}
             style={{ left: clamp(clip.fadeInMs * pxPerMs, 6, Math.max(6, width / 2)) }}
             title={t('clip.fadeIn')}
             onPointerDown={(e) => beginDrag(e, 'fade-in')}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
-          />
+          >
+            <span
+              className={`pointer-events-none rounded-full border border-zinc-900 bg-amber-300 shadow ${coarse ? 'h-4 w-4' : 'h-3 w-3'}`}
+            />
+          </div>
           <div
-            className={`absolute top-0 z-10 -translate-x-1/2 cursor-ew-resize touch-none rounded-full border border-zinc-900 bg-amber-300 shadow ${coarse ? 'h-4 w-4' : 'h-3 w-3'}`}
+            className={`absolute top-0 z-10 flex -translate-x-1/2 items-start justify-center cursor-ew-resize touch-none ${coarse ? 'h-8 w-8' : 'h-6 w-6'}`}
             style={{ left: clamp(width - clip.fadeOutMs * pxPerMs, Math.min(width - 6, width / 2), width - 6) }}
             title={t('clip.fadeOut')}
             onPointerDown={(e) => beginDrag(e, 'fade-out')}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
-          />
+          >
+            <span
+              className={`pointer-events-none rounded-full border border-zinc-900 bg-amber-300 shadow ${coarse ? 'h-4 w-4' : 'h-3 w-3'}`}
+            />
+          </div>
         </>
       )}
     </div>

@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { UploadCloud } from 'lucide-react';
 import { useStore } from './store/store';
 import { initPersistence } from './lib/persistence';
+import { MenuBar } from './ui/MenuBar';
 import { TopBar } from './ui/TopBar';
 import { Transport } from './ui/Transport';
 import { Toast } from './ui/Toast';
@@ -14,7 +15,7 @@ import { Inspector } from './inspector/Inspector';
 import { ExportSheet } from './export/ExportSheet';
 import { useImport } from './ui/useImport';
 import { MediaLibrary } from './ui/MediaLibrary';
-import { ClipActionBar } from './ui/ClipActionBar';
+import { MobileBottomBar } from './ui/MobileBottomBar';
 import { ShortcutsHelp } from './ui/ShortcutsHelp';
 import { useEditorHotkeys } from './ui/useEditorHotkeys';
 import { useIsCoarsePointer } from './lib/device';
@@ -90,6 +91,7 @@ export default function App() {
         if (e.dataTransfer.files.length) void importFiles(e.dataTransfer.files);
       }}
     >
+      {!coarse && <MenuBar />}
       <TopBar />
       <div
         className="flex flex-none border-b border-zinc-800"
@@ -105,8 +107,8 @@ export default function App() {
       {!coarse && <SplitHandle onFrac={applyPreviewFrac} />}
       <Transport />
       <Timeline />
+      {coarse && <MobileBottomBar />}
 
-      <ClipActionBar />
       {coarse && <Inspector />}
       <ExportSheet />
       <ShortcutsHelp />

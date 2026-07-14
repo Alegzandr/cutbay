@@ -767,10 +767,11 @@ export const useStore = create<EditorState>((set, get) => {
     addSubtitleClips: (cues) => {
       if (cues.length === 0) return;
       withHistory((p) => {
-        // Captions always live on their own topmost video track, above any
-        // footage or title tracks.
+        // Captions always live on their own dedicated video track, composited
+        // above any footage. Z-order = array order (the last video track draws
+        // on top), so the caption track goes LAST, not first.
         const track: Track = { id: uid('track'), kind: 'video', clips: [] };
-        p.tracks.unshift(track);
+        p.tracks.push(track);
         for (const cue of cues) {
           track.clips.push({
             id: uid('clip'),

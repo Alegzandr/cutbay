@@ -225,5 +225,64 @@
   "shortcuts.edit.undoRedo": "Desfazer/refazer",
   "shortcuts.edit.export": "Exportar",
   "shortcuts.edit.deselect": "Desmarcar",
-  "shortcuts.edit.togglePanel": "Alternar este painel"
+  "shortcuts.edit.togglePanel": "Alternar este painel",
+
+  "menu.file": "Arquivo",
+  "menu.edit": "Editar",
+  "menu.insert": "Inserir",
+  "menu.clip": "Clipe",
+  "menu.view": "Exibir",
+  "menu.playback": "Reprodução",
+  "menu.help": "Ajuda",
+
+  "menu.file.new": "Novo projeto",
+  "menu.file.import": "Importar mídia…",
+  "menu.file.export": "Exportar…",
+
+  "menu.edit.undo": "Desfazer",
+  "menu.edit.redo": "Refazer",
+  "menu.edit.cut": "Recortar",
+  "menu.edit.copy": "Copiar",
+  "menu.edit.paste": "Colar",
+  "menu.edit.selectAll": "Selecionar tudo",
+
+  "menu.insert.text": "Texto",
+  "menu.insert.color": "Cor sólida",
+  "menu.insert.gradient": "Gradiente",
+  "menu.insert.videoTrack": "Faixa de vídeo",
+  "menu.insert.audioTrack": "Faixa de áudio",
+  "menu.insert.marker": "Marcador no cursor",
+
+  "menu.clip.split": "Dividir no cursor",
+  "menu.clip.duplicate": "Duplicar",
+  "menu.clip.punchIn": "Zoom punch-in",
+  "menu.clip.stream": "Layout stream (facecam + gameplay)",
+  "menu.clip.adjust": "Ajustar",
+  "menu.clip.delete": "Excluir",
+  "menu.clip.rippleDelete": "Excluir e fechar o espaço",
+
+  "menu.view.zoomIn": "Aproximar",
+  "menu.view.zoomOut": "Afastar",
+  "menu.view.zoomFit": "Ajustar à janela",
+  "menu.view.snap": "Encaixe",
+  "menu.view.shortcuts": "Atalhos de teclado",
+
+  "menu.playback.playPause": "Reproduzir / pausar",
+  "menu.playback.start": "Voltar ao início",
+  "menu.playback.loop": "Repetir região",
+  "menu.playback.regionIn": "Ponto de entrada da região",
+  "menu.playback.regionOut": "Ponto de saída da região",
+
+  "menu.help.shortcuts": "Atalhos de teclado",
+
+  "mobile.media": "Mídia",
+  "mobile.text": "Texto",
+  "mobile.color": "Cor",
+  "mobile.gradient": "Gradiente",
+  "mobile.audio": "Áudio",
+  "mobile.video": "Vídeo",
+  "mobile.marker": "Marcador",
+
+  "clipbar.copy": "Copiar",
+  "clipbar.stream": "Layout"
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Crop, LayoutPanelTop, RotateCcw, Trash2, X } from 'lucide-react';
@@ -38,6 +38,7 @@ function SliderRow({
   onChange: (v: number) => void;
 }) {
   const { beginGesture, endGesture } = useStore.getState();
+  const fill = max > min ? ((value - min) / (max - min)) * 100 : 0;
   return (
     <label className="flex items-center gap-3 text-xs text-zinc-400">
       <span className="w-16 flex-none">{label}</span>
@@ -47,7 +48,8 @@ function SliderRow({
         max={max}
         step={step}
         value={value}
-        className="min-w-0 flex-1 accent-sky-500"
+        style={{ '--fill': `${fill}%` } as CSSProperties}
+        className="slider min-w-0 flex-1"
         onPointerDown={beginGesture}
         onPointerUp={endGesture}
         onChange={(e) => onChange(Number(e.target.value))}
@@ -72,30 +74,34 @@ function SpeedControl({ clip }: { clip: Clip }) {
   };
 
   return (
-    <div className="flex items-center gap-2 text-xs text-zinc-400">
-      <span className="w-16 flex-none">{t('inspector.speed')}</span>
-      {[0.5, 1, 1.5, 2].map((s) => (
-        <button
-          key={s}
-          className={`rounded-md px-2 py-1 ${clip.speed === s ? 'bg-sky-500/20 text-sky-300' : 'bg-zinc-800 text-zinc-300 active:bg-zinc-700'}`}
-          onClick={() => updateClipCommitted(clip.id, { speed: s })}
-        >
-          {s}×
-        </button>
-      ))}
-      <input
-        type="number"
-        inputMode="decimal"
-        min={0.1}
-        max={8}
-        step={0.1}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-        className="w-16 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-right text-zinc-200 outline-none focus:border-sky-500"
-      />
-      <span>×</span>
+    <div className="flex items-start gap-2 text-xs text-zinc-400">
+      <span className="w-16 flex-none pt-1.5">{t('inspector.speed')}</span>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        {[0.5, 1, 1.5, 2].map((s) => (
+          <button
+            key={s}
+            className={`rounded-md px-2 py-1 ${clip.speed === s ? 'bg-sky-500/20 text-sky-300' : 'bg-zinc-800 text-zinc-300 active:bg-zinc-700'}`}
+            onClick={() => updateClipCommitted(clip.id, { speed: s })}
+          >
+            {s}×
+          </button>
+        ))}
+        <div className="flex items-center gap-1">
+          <input
+            type="number"
+            inputMode="decimal"
+            min={0.1}
+            max={8}
+            step={0.1}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+            className="w-14 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-right text-zinc-200 outline-none focus:border-sky-500"
+          />
+          <span>×</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -113,7 +119,7 @@ export function Inspector() {
   if (!coarse) {
     if (!clip) return null;
     return (
-      <div className="w-72 flex-none space-y-3 overflow-y-auto border-l border-zinc-800 bg-zinc-900/60 p-3">
+      <div className="w-72 flex-none space-y-3 overflow-x-hidden overflow-y-auto border-l border-zinc-800 bg-zinc-900/60 p-3">
         <InspectorBody
           clip={clip}
           isVideo={asset?.kind === 'video'}
@@ -134,7 +140,7 @@ export function Inspector() {
           animate={{ y: 0 }}
           exit={{ y: '110%' }}
           transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-          className="fixed inset-x-0 bottom-0 z-40 max-h-[55dvh] space-y-3 overflow-y-auto rounded-t-2xl border-t border-zinc-800 bg-zinc-900 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl shadow-black"
+          className="fixed inset-x-0 bottom-0 z-40 max-h-[55dvh] space-y-3 overflow-x-hidden overflow-y-auto rounded-t-2xl border-t border-zinc-800 bg-zinc-900 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl shadow-black"
         >
           <InspectorBody
             clip={clip}

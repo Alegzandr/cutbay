@@ -5,6 +5,7 @@ import { APP_NAME } from '../app/config';
 import logoUrl from '../assets/logo.png';
 import { useStore } from '../store/store';
 import { useImport } from './useImport';
+import { Tooltip } from './Tooltip';
 import { useIsCoarsePointer } from '../lib/device';
 import { AspectRatio } from '../types';
 
@@ -67,7 +68,19 @@ export function TopBar() {
   const { setAspectRatio, undo, redo, setExportOpen, addTextClip, addSolidClip, setLibraryOpen } = useStore.getState();
   const importFiles = useImport();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const createRef = useRef<HTMLDivElement>(null);
   const [createOpen, setCreateOpen] = useState(false);
+
+  // Close the "Add" menu on any press outside it (incl. the Import/Export
+  // buttons next to it), so it never lingers over the toolbar.
+  useEffect(() => {
+    if (!createOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (createRef.current && !createRef.current.contains(e.target as Node)) setCreateOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [createOpen]);
 
   return (
     <header className="flex h-12 flex-none items-center gap-1 border-b border-zinc-800 bg-zinc-900 px-2 sm:gap-2 sm:px-3">
@@ -139,7 +152,10 @@ export function TopBar() {
           e.target.value = '';
         }}
       />
-      <div className="relative">
+      {/* Touch: Add and Import live in the CapCut-style bottom tool rail. */}
+      {!coarse && (
+        <>
+      <div className="relative" ref={createRef}>
         <button
           className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-200 active:bg-zinc-800"
           onClick={() => setCreateOpen((open) => !open)}
@@ -173,6 +189,8 @@ export function TopBar() {
         <FilePlus className="h-4 w-4" />
         <span className="hidden sm:inline">{t('topbar.import')}</span>
       </button>
+        </>
+      )}
       <button
         className="flex items-center gap-1.5 rounded-lg bg-sky-500 px-2.5 py-1.5 text-xs font-semibold text-white active:bg-sky-600"
         onClick={() => setExportOpen(true)}

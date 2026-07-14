@@ -225,5 +225,64 @@
   "shortcuts.edit.undoRedo": "Annuler/rétablir",
   "shortcuts.edit.export": "Exporter",
   "shortcuts.edit.deselect": "Désélectionner",
-  "shortcuts.edit.togglePanel": "Basculer ce panneau"
+  "shortcuts.edit.togglePanel": "Basculer ce panneau",
+
+  "menu.file": "Fichier",
+  "menu.edit": "Édition",
+  "menu.insert": "Insertion",
+  "menu.clip": "Clip",
+  "menu.view": "Affichage",
+  "menu.playback": "Lecture",
+  "menu.help": "Aide",
+
+  "menu.file.new": "Nouveau projet",
+  "menu.file.import": "Importer des médias…",
+  "menu.file.export": "Exporter…",
+
+  "menu.edit.undo": "Annuler",
+  "menu.edit.redo": "Rétablir",
+  "menu.edit.cut": "Couper",
+  "menu.edit.copy": "Copier",
+  "menu.edit.paste": "Coller",
+  "menu.edit.selectAll": "Tout sélectionner",
+
+  "menu.insert.text": "Texte",
+  "menu.insert.color": "Couleur unie",
+  "menu.insert.gradient": "Dégradé",
+  "menu.insert.videoTrack": "Piste vidéo",
+  "menu.insert.audioTrack": "Piste audio",
+  "menu.insert.marker": "Marqueur à la tête de lecture",
+
+  "menu.clip.split": "Diviser à la tête de lecture",
+  "menu.clip.duplicate": "Dupliquer",
+  "menu.clip.punchIn": "Zoom punch-in",
+  "menu.clip.stream": "Disposition stream (facecam + gameplay)",
+  "menu.clip.adjust": "Ajuster",
+  "menu.clip.delete": "Supprimer",
+  "menu.clip.rippleDelete": "Supprimer et combler",
+
+  "menu.view.zoomIn": "Zoom avant",
+  "menu.view.zoomOut": "Zoom arrière",
+  "menu.view.zoomFit": "Ajuster à la fenêtre",
+  "menu.view.snap": "Aimantation",
+  "menu.view.shortcuts": "Raccourcis clavier",
+
+  "menu.playback.playPause": "Lecture / pause",
+  "menu.playback.start": "Retour au début",
+  "menu.playback.loop": "Boucler la région",
+  "menu.playback.regionIn": "Point d'entrée de région",
+  "menu.playback.regionOut": "Point de sortie de région",
+
+  "menu.help.shortcuts": "Raccourcis clavier",
+
+  "mobile.media": "Média",
+  "mobile.text": "Texte",
+  "mobile.color": "Couleur",
+  "mobile.gradient": "Dégradé",
+  "mobile.audio": "Audio",
+  "mobile.video": "Vidéo",
+  "mobile.marker": "Marqueur",
+
+  "clipbar.copy": "Copier",
+  "clipbar.stream": "Disposition"
 }

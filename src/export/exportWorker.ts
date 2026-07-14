@@ -79,6 +79,10 @@ async function exportMp4(req: ExportRequest): Promise<void> {
 
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d')!;
+  // High-quality resampling so every export resolution (incl. 4K downscales and
+  // upscaled sources) gets the cleanest fit/crop/zoom, not the default 'low' pass.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   const videoSource = new CanvasSource(canvas, {
     codec: 'avc',
     bitrate: preset.videoBitrate!,

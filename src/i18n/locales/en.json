@@ -244,5 +244,64 @@
   "shortcuts.edit.undoRedo": "Undo / redo",
   "shortcuts.edit.export": "Export",
   "shortcuts.edit.deselect": "Deselect",
-  "shortcuts.edit.togglePanel": "Toggle this panel"
+  "shortcuts.edit.togglePanel": "Toggle this panel",
+
+  "menu.file": "File",
+  "menu.edit": "Edit",
+  "menu.insert": "Insert",
+  "menu.clip": "Clip",
+  "menu.view": "View",
+  "menu.playback": "Playback",
+  "menu.help": "Help",
+
+  "menu.file.new": "New project",
+  "menu.file.import": "Import media…",
+  "menu.file.export": "Export…",
+
+  "menu.edit.undo": "Undo",
+  "menu.edit.redo": "Redo",
+  "menu.edit.cut": "Cut",
+  "menu.edit.copy": "Copy",
+  "menu.edit.paste": "Paste",
+  "menu.edit.selectAll": "Select all",
+
+  "menu.insert.text": "Text",
+  "menu.insert.color": "Solid color",
+  "menu.insert.gradient": "Gradient",
+  "menu.insert.videoTrack": "Video track",
+  "menu.insert.audioTrack": "Audio track",
+  "menu.insert.marker": "Marker at playhead",
+
+  "menu.clip.split": "Split at playhead",
+  "menu.clip.duplicate": "Duplicate",
+  "menu.clip.punchIn": "Punch-in zoom",
+  "menu.clip.stream": "Stream layout (facecam + gameplay)",
+  "menu.clip.adjust": "Adjust",
+  "menu.clip.delete": "Delete",
+  "menu.clip.rippleDelete": "Ripple delete",
+
+  "menu.view.zoomIn": "Zoom in",
+  "menu.view.zoomOut": "Zoom out",
+  "menu.view.zoomFit": "Zoom to fit",
+  "menu.view.snap": "Snapping",
+  "menu.view.shortcuts": "Keyboard shortcuts",
+
+  "menu.playback.playPause": "Play / pause",
+  "menu.playback.start": "Back to start",
+  "menu.playback.loop": "Loop region",
+  "menu.playback.regionIn": "Set region in",
+  "menu.playback.regionOut": "Set region out",
+
+  "menu.help.shortcuts": "Keyboard shortcuts",
+
+  "mobile.media": "Media",
+  "mobile.text": "Text",
+  "mobile.color": "Color",
+  "mobile.gradient": "Gradient",
+  "mobile.audio": "Audio",
+  "mobile.video": "Video",
+  "mobile.marker": "Marker",
+
+  "clipbar.copy": "Copy",
+  "clipbar.stream": "Layout"
 }
