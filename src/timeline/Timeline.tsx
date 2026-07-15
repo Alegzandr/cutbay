@@ -6,10 +6,14 @@ import { TrackRow } from './TrackRow';
 import { Ruler } from './Ruler';
 import { Playhead } from './Playhead';
 import { MarkerBar, TimelineOverlay } from './MarkerBar';
-import { msFromClientX, msFromContentX, timelineContentEl } from './coords';
-import { ASSET_DRAG_MIME, TIMELINE_PAD_LEFT } from '../app/config';
+import { msFromClientX } from './coords';
+import { TIMELINE_PAD_LEFT } from '../app/config';
 import { useImport } from '../ui/useImport';
 import { useIsCoarsePointer } from '../lib/device';
+import { useTimelineWheel } from './hooks/useTimelineWheel';
+import { usePinchZoom } from './hooks/usePinchZoom';
+import { useMobileScrubSync } from './hooks/useMobileScrubSync';
+import { useAssetDrop } from './hooks/useAssetDrop';
 
 export function Timeline() {
   const { t } = useTranslation();
@@ -50,149 +54,10 @@ export function Timeline() {
     useStore.getState().setTimelinePadLeft(padLeft);
   }, [padLeft]);
 
-  // Wheel. Desktop (Vegas-style): plain wheel pans horizontally, Ctrl/Cmd+wheel zooms
-  // at the cursor (also covers trackpad pinch), Alt+wheel keeps native vertical scroll.
-  useEffect(() => {
-    const scroller = scrollerRef.current;
-    if (!scroller) return;
-    const onWheel = (e: WheelEvent) => {
-      if (e.deltaY === 0) return;
-      if (e.ctrlKey || e.metaKey || coarse) {
-        e.preventDefault();
-        const state = useStore.getState();
-        const factor = Math.exp(-e.deltaY * 0.0018);
-        const rect = scroller.getBoundingClientRect();
-        const pad = state.timelinePadLeft;
-        const contentX = scroller.scrollLeft + e.clientX - rect.left;
-        const anchorMs = (contentX - pad) / (state.pxPerSec / 1000);
-        state.setPxPerSec(state.pxPerSec * factor);
-        const newPxPerMs = useStore.getState().pxPerSec / 1000;
-        scroller.scrollLeft = anchorMs * newPxPerMs + pad - (e.clientX - rect.left);
-      } else if (!e.altKey && !e.shiftKey) {
-        e.preventDefault();
-        scroller.scrollLeft += e.deltaY;
-      }
-    };
-    scroller.addEventListener('wheel', onWheel, { passive: false });
-    return () => scroller.removeEventListener('wheel', onWheel);
-  }, [coarse, empty]);
-
-  // Two-finger pinch zoom + pause playback when the timeline is touched (mobile).
-  useEffect(() => {
-    const scroller = scrollerRef.current;
-    if (!scroller) return;
-    const pointers = new Map<number, { x: number; y: number }>();
-    let pinchStartDist = 0;
-    let pinchStartPxPerSec = 0;
-
-    const onDown = (e: PointerEvent) => {
-      if (coarse && e.pointerType === 'touch') {
-        const s = useStore.getState();
-        if (s.playing) s.setPlaying(false);
-      }
-      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pointers.size === 2) {
-        const pts = [...pointers.values()];
-        const a = pts[0]!;
-        const b = pts[1]!;
-        pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
-        pinchStartPxPerSec = useStore.getState().pxPerSec;
-        pinching.current = true;
-      }
-    };
-    const onMove = (e: PointerEvent) => {
-      if (!pointers.has(e.pointerId)) return;
-      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (pointers.size === 2 && pinchStartDist > 0) {
-        const pts = [...pointers.values()];
-        const a = pts[0]!;
-        const b = pts[1]!;
-        const dist = Math.hypot(a.x - b.x, a.y - b.y);
-        useStore.getState().setPxPerSec(pinchStartPxPerSec * (dist / pinchStartDist));
-      }
-    };
-    const onUp = (e: PointerEvent) => {
-      pointers.delete(e.pointerId);
-      if (pointers.size < 2) {
-        pinchStartDist = 0;
-        pinching.current = false;
-      }
-    };
-
-    scroller.addEventListener('pointerdown', onDown);
-    scroller.addEventListener('pointermove', onMove);
-    scroller.addEventListener('pointerup', onUp);
-    scroller.addEventListener('pointercancel', onUp);
-    return () => {
-      scroller.removeEventListener('pointerdown', onDown);
-      scroller.removeEventListener('pointermove', onMove);
-      scroller.removeEventListener('pointerup', onUp);
-      scroller.removeEventListener('pointercancel', onUp);
-    };
-  }, [coarse, empty]);
-
-  // Mobile scroll<->time sync: scrolling scrubs (scrollLeft = t * pxPerMs), and any
-  // time/zoom change re-centers the content under the fixed playhead.
-  useEffect(() => {
-    if (!coarse) return;
-    const scroller = scrollerRef.current;
-    if (!scroller) return;
-
-    const sync = () => {
-      const s = useStore.getState();
-      const target = s.currentTimeMs * (s.pxPerSec / 1000);
-      if (Math.abs(scroller.scrollLeft - target) > 1) {
-        programmaticScroll.current = true;
-        scroller.scrollLeft = target;
-      }
-    };
-    sync();
-    const unsub = useStore.subscribe((s, prev) => {
-      if (s.currentTimeMs !== prev.currentTimeMs || s.pxPerSec !== prev.pxPerSec) sync();
-    });
-
-    const onScroll = () => {
-      const left = scroller.scrollLeft;
-      if (left === lastScrollLeft.current) return; // vertical-only scroll
-      lastScrollLeft.current = left;
-      if (programmaticScroll.current) {
-        programmaticScroll.current = false;
-        return;
-      }
-      if (pinching.current) return;
-      const s = useStore.getState();
-      if (s.playing) return; // the engine drives time; touching pauses first
-      s.seek(left / (s.pxPerSec / 1000));
-    };
-    scroller.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      unsub();
-      scroller.removeEventListener('scroll', onScroll);
-    };
-  }, [coarse, empty]);
-
-  // Drag from the media library: drop an asset at a precise time (and track).
-  const onAssetDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes(ASSET_DRAG_MIME)) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'copy';
-    }
-  };
-  const onAssetDrop = (e: React.DragEvent) => {
-    const assetId = e.dataTransfer.getData(ASSET_DRAG_MIME);
-    if (!assetId) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const s = useStore.getState();
-    const content = timelineContentEl(e.currentTarget as HTMLElement);
-    if (!content) {
-      s.addClipFromAssetAt(assetId, 0);
-      return;
-    }
-    const ms = msFromContentX(content, e.clientX);
-    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-track-id]');
-    s.addClipFromAssetAt(assetId, ms, row?.dataset.trackId);
-  };
+  useTimelineWheel(scrollerRef, coarse, empty);
+  usePinchZoom(scrollerRef, coarse, pinching, empty);
+  useMobileScrubSync(scrollerRef, coarse, { programmaticScroll, pinching, lastScrollLeft }, empty);
+  const { onAssetDragOver, onAssetDrop } = useAssetDrop();
 
   if (empty) {
     return (
