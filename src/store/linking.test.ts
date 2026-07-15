@@ -1,0 +1,220 @@
+import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
+import type { MediaAsset } from '../types';
+import { linkableSelection } from './projectOps';
+
+/**
+ * A/V linking: importing a video that carries audio must drop a picture clip AND
+ * a linked audio clip, and every edit (move/trim/split/delete/duplicate) has to
+ * keep the two sides in lockstep.
+ *
+ * The store is imported dynamically: its i18n dependency sets `document.lang` at
+ * load time, so we stub a minimal `document` first (the suite runs in the node
+ * environment, like the rest of the pure-logic tests).
+ */
+
+let useStore: typeof import('./store').useStore;
+
+beforeAll(async () => {
+  const g = globalThis as { document?: unknown; structuredClone: typeof structuredClone };
+  g.document ??= { documentElement: {} };
+  // Node's structuredClone rejects Immer draft proxies (the browser's accepts
+  // them); split/duplicate clone drafts inside produce(). Clips are plain JSON
+  // data, so a JSON clone is an equivalent stand-in for this node-env suite.
+  g.structuredClone = (<T>(v: T): T => JSON.parse(JSON.stringify(v)) as T) as typeof structuredClone;
+  ({ useStore } = await import('./store'));
+});
+
+function videoAsset(id: string, durationMs = 5000): MediaAsset {
+  return {
+    id,
+    file: new File([], `${id}.mp4`),
+    kind: 'video',
+    durationMs,
+    width: 1920,
+    height: 1080,
+    hasAudio: true,
+    thumbnails: [],
+  };
+}
+
+const s = () => useStore.getState();
+
+function tracksByKind() {
+  const video = s().project.tracks.filter((t) => t.kind === 'video');
+  const audio = s().project.tracks.filter((t) => t.kind === 'audio');
+  return { video, audio };
+}
+
+/** The (video, audio) clips of the single linked pair on the timeline. */
+function pair() {
+  const clips = s().project.tracks.flatMap((t) => t.clips.map((c) => ({ c, kind: t.kind })));
+  const video = clips.find((x) => x.kind === 'video')!.c;
+  const audio = clips.find((x) => x.kind === 'audio')!.c;
+  return { video, audio };
+}
+
+beforeEach(() => {
+  useStore.getState().resetProject();
+});
+
+describe('addClipFromAsset', () => {
+  it('creates a linked audio clip beside the video, aligned in time', () => {
+    s().addAsset(videoAsset('v'));
+    s().addClipFromAsset('v');
+
+    const { video, audio } = tracksByKind();
+    expect(video).toHaveLength(1);
+    expect(audio).toHaveLength(1);
+    const vClip = video[0]!.clips[0]!;
+    const aClip = audio[0]!.clips[0]!;
+    expect(vClip.linkId).toBeTruthy();
+    expect(aClip.linkId).toBe(vClip.linkId);
+    expect(aClip.timelineStartMs).toBe(vClip.timelineStartMs);
+    expect(aClip.sourceOutMs).toBe(vClip.sourceOutMs);
+    expect(aClip.assetId).toBe('v');
+  });
+
+  it('does not split audio for a silent video', () => {
+    s().addAsset({ ...videoAsset('v'), hasAudio: false });
+    s().addClipFromAsset('v');
+    const { video, audio } = tracksByKind();
+    expect(video[0]!.clips).toHaveLength(1);
+    expect(video[0]!.clips[0]!.linkId).toBeUndefined();
+    expect(audio).toHaveLength(0);
+  });
+});
+
+describe('linked edits', () => {
+  beforeEach(() => {
+    s().addAsset(videoAsset('v'));
+    s().addClipFromAsset('v');
+  });
+
+  it('moves the audio partner by the same delta', () => {
+    const { video } = pair();
+    s().moveClip(video.id, 2000);
+    const after = pair();
+    expect(after.video.timelineStartMs).toBe(2000);
+    expect(after.audio.timelineStartMs).toBe(2000);
+  });
+
+  it('keeps the audio partner on its own track when the video changes track', () => {
+    s().addTrack('video');
+    const otherVideo = tracksByKind().video[1]!;
+    const { video, audio } = pair();
+    s().moveClip(video.id, 1000, otherVideo.id);
+    const after = pair();
+    expect(after.video.trackId).toBe(otherVideo.id);
+    expect(after.audio.trackId).toBe(audio.trackId); // unchanged audio track
+    expect(after.audio.timelineStartMs).toBe(1000);
+  });
+
+  it('trims both sides together', () => {
+    const { video } = pair();
+    s().trimClip(video.id, 'right', 3000);
+    const after = pair();
+    expect(after.video.sourceOutMs).toBe(after.audio.sourceOutMs);
+    expect(after.audio.sourceOutMs).toBeLessThan(5000);
+  });
+
+  it('splits both sides and re-pairs each half', () => {
+    s().seek(2000);
+    s().selectClip(null);
+    s().splitAtPlayhead();
+
+    const videoClips = tracksByKind().video[0]!.clips;
+    const audioClips = tracksByKind().audio[0]!.clips;
+    expect(videoClips).toHaveLength(2);
+    expect(audioClips).toHaveLength(2);
+
+    // Four clips, two distinct links, each pairing exactly one video + one audio.
+    const groups = new Map<string, string[]>();
+    for (const c of [...videoClips, ...audioClips]) {
+      expect(c.linkId).toBeTruthy();
+      groups.set(c.linkId!, [...(groups.get(c.linkId!) ?? []), c.id]);
+    }
+    expect(groups.size).toBe(2);
+    for (const ids of groups.values()) expect(ids).toHaveLength(2);
+  });
+
+  it('deletes the partner when one side is deleted', () => {
+    const { audio } = pair();
+    s().deleteClip(audio.id);
+    const total = s().project.tracks.reduce((n, t) => n + t.clips.length, 0);
+    expect(total).toBe(0);
+  });
+
+  it('unlinks into two independent, non-doubled clips', () => {
+    const { video } = pair();
+    s().unlinkClip(video.id);
+    const after = pair();
+    expect(after.video.linkId).toBeUndefined();
+    expect(after.audio.linkId).toBeUndefined();
+    // Audio stays on the audio clip; the video side is muted so sound is not doubled.
+    expect(after.video.volume).toBe(0);
+    expect(after.audio.volume).toBe(1);
+  });
+
+  it('leaves unlinked clips free to move on their own', () => {
+    const { video, audio } = pair();
+    s().unlinkClip(video.id);
+    s().moveClip(video.id, 3000);
+    const after = pair();
+    expect(after.video.timelineStartMs).toBe(3000);
+    expect(after.audio.timelineStartMs).toBe(audio.timelineStartMs); // unchanged
+  });
+
+  it('duplicates the pair as a fresh link', () => {
+    const { video } = pair();
+    s().duplicateClip(video.id);
+    const videoClips = tracksByKind().video[0]!.clips;
+    const audioClips = tracksByKind().audio[0]!.clips;
+    expect(videoClips).toHaveLength(2);
+    expect(audioClips).toHaveLength(2);
+    const links = new Set([...videoClips, ...audioClips].map((c) => c.linkId));
+    expect(links.size).toBe(2); // original link + the duplicate's link
+  });
+});
+
+describe('re-link', () => {
+  beforeEach(() => {
+    s().addAsset(videoAsset('v'));
+    s().addClipFromAsset('v');
+  });
+
+  it('joins two unlinked clips into one shared link', () => {
+    const { video, audio } = pair();
+    s().unlinkClip(video.id);
+    s().linkClips([video.id, audio.id]);
+    const after = pair();
+    expect(after.video.linkId).toBeTruthy();
+    expect(after.audio.linkId).toBe(after.video.linkId);
+  });
+
+  it('auto-pairs a single unlinked clip with its same-asset partner', () => {
+    const { video } = pair();
+    s().unlinkClip(video.id);
+    // Only the video is selected; its audio is resolved as the link candidate.
+    const targets = linkableSelection(s().project, [video.id]);
+    expect(targets).not.toBeNull();
+    s().linkClips(targets!);
+    const after = pair();
+    expect(after.video.linkId).toBe(after.audio.linkId);
+    expect(after.video.linkId).toBeTruthy();
+  });
+
+  it('offers no link target while the pair is already linked', () => {
+    const { video } = pair();
+    expect(linkableSelection(s().project, [video.id])).toBeNull();
+  });
+
+  it('makes re-linked clips move together again', () => {
+    const { video, audio } = pair();
+    s().unlinkClip(video.id);
+    s().linkClips([video.id, audio.id]);
+    s().moveClip(video.id, 2500);
+    const after = pair();
+    expect(after.video.timelineStartMs).toBe(2500);
+    expect(after.audio.timelineStartMs).toBe(2500);
+  });
+});

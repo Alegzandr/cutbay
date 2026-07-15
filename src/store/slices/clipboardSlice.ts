@@ -11,7 +11,12 @@ export function createClipboardSlice(
   return {
     copyClip: (clipId) => {
       const found = findClip(get().project, clipId);
-      if (found) set({ clipboard: { clip: structuredClone(found.clip), kind: found.track.kind } });
+      if (!found) return;
+      // A pasted clip is standalone - drop the A/V link so it does not attach to
+      // the original's partner.
+      const clip = structuredClone(found.clip);
+      delete clip.linkId;
+      set({ clipboard: { clip, kind: found.track.kind } });
     },
 
     cutClip: (clipId) => {

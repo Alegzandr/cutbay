@@ -11,7 +11,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { useStore } from '../../store/store';
+import { useStore, getLinkTargets } from '../../store/store';
 import type { ContextTarget } from '../../store/editorState';
 import { reconnectAssetViaPicker } from '../MediaLibrary';
 import { useEditorCommands, type Command } from '../commands';
@@ -33,6 +33,7 @@ export function useContextMenuItems(target: ContextTarget): MenuEntry[] {
   const commands = useEditorCommands();
   const tracks = useStore((s) => s.project.tracks);
   const assets = useStore((s) => s.assets);
+  const canLink = useStore((s) => getLinkTargets(s) !== null);
   const st = useStore.getState;
 
   /** Map global command ids (and separators) to rows, dropping unknown ids. */
@@ -42,7 +43,9 @@ export function useContextMenuItems(target: ContextTarget): MenuEntry[] {
       .filter((e): e is MenuEntry => e !== null);
 
   switch (target.kind) {
-    case 'clip':
+    case 'clip': {
+      const clip = tracks.flatMap((tr) => tr.clips).find((c) => c.id === target.clipId);
+      const linked = clip?.linkId != null;
       return resolve([
         'edit.cut',
         'edit.copy',
@@ -52,10 +55,14 @@ export function useContextMenuItems(target: ContextTarget): MenuEntry[] {
         'clip.punchIn',
         'clip.stream',
         'clip.adjust',
+        // Link when the selection joins into a pair; unlink on an already-linked clip.
+        ...(canLink ? ['clip.link'] : []),
+        ...(linked ? ['clip.unlink'] : []),
         '---',
         'clip.delete',
         'clip.rippleDelete',
       ]);
+    }
 
     case 'timeline':
       return resolve([

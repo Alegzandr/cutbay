@@ -75,6 +75,8 @@
   "clip.text.placeholder": "Text",
 
   "clipbar.adjust": "Adjust",
+  "clipbar.link": "Link",
+  "clipbar.unlink": "Unlink",
   "clipbar.delete": "Delete",
   "clipbar.duplicate": "Duplicate",
   "clipbar.punchIn": "Punch in",
@@ -299,6 +301,8 @@
   "menu.clip.punchIn": "Punch-in zoom",
   "menu.clip.stream": "Stream layout (facecam + gameplay)",
   "menu.clip.adjust": "Adjust",
+  "menu.clip.link": "Link audio",
+  "menu.clip.unlink": "Unlink audio",
   "menu.clip.delete": "Delete",
   "menu.clip.rippleDelete": "Ripple delete",
 

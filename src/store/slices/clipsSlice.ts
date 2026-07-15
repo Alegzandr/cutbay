@@ -1,6 +1,6 @@
 import type { StoreSet, StoreGet, SliceHelpers } from '../sliceHelpers';
 import type { EditorState } from '../editorState';
-import { Clip, ClipTransform, Track } from '../../types';
+import { Clip, ClipTransform, Project, Track } from '../../types';
 import {
   DEFAULT_TRANSFORM,
   clipDurationMs,
@@ -9,10 +9,29 @@ import {
   timelineToSourceMs,
 } from '../../model';
 import { uid } from '../../lib/id';
-import { ensureTrack, findClip, insertTrack, patchClips } from '../projectOps';
+import {
+  ensureTrack,
+  findClip,
+  insertTrack,
+  linkedPartnerIds,
+  patchClips,
+  withLinkedIds,
+} from '../projectOps';
 import { clamp } from '../../lib/time';
 import { MIN_CLIP_DURATION_MS } from '../../app/config';
 import { t as translate } from '../../i18n';
+
+/** Copy-on-write edits shifting each clip's start by `delta` (clamped ≥ 0). */
+function shiftEdits(clipIds: string[], delta: number): Map<string, (c: Clip) => Clip> {
+  const edits = new Map<string, (c: Clip) => Clip>();
+  for (const id of clipIds) {
+    edits.set(id, (c) => {
+      const next = Math.max(0, c.timelineStartMs + delta);
+      return next === c.timelineStartMs ? c : { ...c, timelineStartMs: next };
+    });
+  }
+  return edits;
+}
 
 export function createClipsSlice(
   set: StoreSet,
@@ -34,6 +53,8 @@ export function createClipsSlice(
   | 'rippleDeleteClip'
   | 'deleteClips'
   | 'duplicateClip'
+  | 'unlinkClip'
+  | 'linkClips'
   | 'punchZoomSelected'
   | 'addSubtitleClips'
   | 'applyStreamLayout'
@@ -43,10 +64,22 @@ export function createClipsSlice(
     addClipFromAsset: (assetId) => {
       const asset = get().assets[assetId];
       if (!asset) return;
+      // A video that carries audio lands as an A/V-linked pair: the picture on a
+      // video track, its audio split onto an audio track so it can be edited on
+      // its own while staying tied to the video.
+      const withAudio = asset.kind === 'video' && asset.hasAudio;
       let newClipId = '';
       withHistory((p) => {
+        const trackEnd = (t: Track) => t.clips.reduce((max, c) => Math.max(max, clipEndMs(c)), 0);
         const track = ensureTrack(p, asset.kind);
-        const start = track.clips.reduce((max, c) => Math.max(max, clipEndMs(c)), 0);
+        const audioTrack = withAudio ? ensureTrack(p, 'audio') : undefined;
+        // The pair shares one start, placed past the end of BOTH tracks so
+        // neither side overlaps and gets nudged independently (which would
+        // desync them).
+        const start = audioTrack
+          ? Math.max(trackEnd(track), trackEnd(audioTrack))
+          : trackEnd(track);
+        const linkId = withAudio ? uid('link') : undefined;
         const clip: Clip = {
           kind: 'media',
           id: uid('clip'),
@@ -59,9 +92,26 @@ export function createClipsSlice(
           volume: 1,
           fadeInMs: 0,
           fadeOutMs: 0,
+          ...(linkId ? { linkId } : {}),
         };
         newClipId = clip.id;
         track.clips.push(clip);
+        if (audioTrack && linkId) {
+          audioTrack.clips.push({
+            kind: 'media',
+            id: uid('clip'),
+            assetId,
+            trackId: audioTrack.id,
+            timelineStartMs: start,
+            sourceInMs: 0,
+            sourceOutMs: asset.durationMs,
+            speed: 1,
+            volume: 1,
+            fadeInMs: 0,
+            fadeOutMs: 0,
+            linkId,
+          });
+        }
       });
       set({ selectedClipId: newClipId, selectedClipIds: [newClipId] });
     },
@@ -69,23 +119,45 @@ export function createClipsSlice(
     addClipFromAssetAt: (assetId, timelineMs, targetTrackId) => {
       const asset = get().assets[assetId];
       if (!asset) return;
+      const withAudio = asset.kind === 'video' && asset.hasAudio;
       const newClipId = uid('clip');
+      const start = Math.max(0, timelineMs);
       // The dropped clip keeps its position (priority) when overlaps settle.
       withHistory((p) => {
         const track = ensureTrack(p, asset.kind, targetTrackId);
+        const linkId = withAudio ? uid('link') : undefined;
         track.clips.push({
           kind: 'media',
           id: newClipId,
           assetId,
           trackId: track.id,
-          timelineStartMs: Math.max(0, timelineMs),
+          timelineStartMs: start,
           sourceInMs: 0,
           sourceOutMs: asset.durationMs,
           speed: 1,
           volume: 1,
           fadeInMs: 0,
           fadeOutMs: 0,
+          ...(linkId ? { linkId } : {}),
         });
+        if (linkId) {
+          // The extracted audio drops at the same instant, on the audio track.
+          const audioTrack = ensureTrack(p, 'audio');
+          audioTrack.clips.push({
+            kind: 'media',
+            id: uid('clip'),
+            assetId,
+            trackId: audioTrack.id,
+            timelineStartMs: start,
+            sourceInMs: 0,
+            sourceOutMs: asset.durationMs,
+            speed: 1,
+            volume: 1,
+            fadeInMs: 0,
+            fadeOutMs: 0,
+            linkId,
+          });
+        }
       }, newClipId);
       set({ selectedClipId: newClipId, selectedClipIds: [newClipId] });
     },
@@ -186,6 +258,9 @@ export function createClipsSlice(
       const found = findClip(p, clipId);
       if (!found) return;
       const start = Math.max(0, timelineStartMs);
+      const delta = start - found.clip.timelineStartMs;
+      // Linked partners follow the same time delta, staying on their own track.
+      const shiftBy = shiftEdits(linkedPartnerIds(p, clipId), delta);
       const target =
         targetTrackId && targetTrackId !== found.track.id
           ? p.tracks.find((t) => t.id === targetTrackId)
@@ -197,22 +272,32 @@ export function createClipsSlice(
           if (t.id === target.id) return { ...t, clips: [...t.clips, moved] };
           return t;
         });
-        set({ project: { ...p, tracks } });
+        const next: Project = { ...p, tracks };
+        set({ project: shiftBy.size ? patchClips(next, shiftBy) : next });
         return;
       }
-      if (found.clip.timelineStartMs === start) return;
-      set({
-        project: patchClips(p, new Map([[clipId, (c: Clip) => ({ ...c, timelineStartMs: start })]])),
-      });
+      if (delta === 0) return;
+      const edits = new Map(shiftBy);
+      edits.set(clipId, (c: Clip) => ({ ...c, timelineStartMs: start }));
+      set({ project: patchClips(p, edits) });
     },
 
     moveClips: (entries) => {
+      const p = get().project;
+      const inSet = new Set(entries.map((e) => e.clipId));
       const edits = new Map<string, (c: Clip) => Clip>();
       for (const { clipId, timelineStartMs } of entries) {
         const start = Math.max(0, timelineStartMs);
         edits.set(clipId, (c) => (c.timelineStartMs === start ? c : { ...c, timelineStartMs: start }));
+        const found = findClip(p, clipId);
+        if (!found) continue;
+        // Drag a linked clip's partner along, unless it is already moving on its own.
+        const delta = start - found.clip.timelineStartMs;
+        for (const [id, edit] of shiftEdits(linkedPartnerIds(p, clipId), delta)) {
+          if (!inSet.has(id) && !edits.has(id)) edits.set(id, edit);
+        }
       }
-      set({ project: patchClips(get().project, edits) });
+      set({ project: patchClips(p, edits) });
     },
 
     trimClip: (clipId, edge, timelineMs) => {
@@ -237,31 +322,48 @@ export function createClipsSlice(
         if (sourceOut === clip.sourceOutMs) return clip;
         return { ...clip, sourceOutMs: sourceOut };
       };
-      set({ project: patchClips(get().project, new Map([[clipId, edit]])) });
+      const p = get().project;
+      // Linked partners share the source geometry, so the same edit trims the
+      // extracted audio in lockstep with the video (and vice versa).
+      const edits = new Map<string, (c: Clip) => Clip>([[clipId, edit]]);
+      for (const id of linkedPartnerIds(p, clipId)) edits.set(id, edit);
+      set({ project: patchClips(p, edits) });
     },
 
     splitAtPlayhead: () => {
       const { currentTimeMs, selectedClipId, project } = get();
+      const crosses = (clip: Clip) =>
+        currentTimeMs > clip.timelineStartMs + 1 && currentTimeMs < clipEndMs(clip) - 1;
       // Target: the selected clip if the playhead is inside it, otherwise every clip under it.
       const collect = (onlySelected: boolean): string[] => {
         const out: string[] = [];
         for (const track of project.tracks) {
           for (const clip of track.clips) {
-            const inside =
-              currentTimeMs > clip.timelineStartMs + 1 && currentTimeMs < clipEndMs(clip) - 1;
-            if (inside && (!onlySelected || clip.id === selectedClipId)) out.push(clip.id);
+            if (crosses(clip) && (!onlySelected || clip.id === selectedClipId)) out.push(clip.id);
           }
         }
         return out;
       };
       let targets = selectedClipId ? collect(true) : [];
       if (targets.length === 0) targets = collect(false);
-      if (targets.length === 0) return;
+      // A linked clip splits together with its partner, so long as the playhead
+      // crosses it too - otherwise the halves would desync.
+      const targetSet = new Set(targets);
+      for (const id of targets) {
+        for (const pid of linkedPartnerIds(project, id)) {
+          const partner = findClip(project, pid)?.clip;
+          if (partner && crosses(partner)) targetSet.add(pid);
+        }
+      }
+      if (targetSet.size === 0) return;
       withHistory((p) => {
+        // Each linked group's right halves get one fresh linkId, so a split pair
+        // stays paired with its own side instead of all four sharing one link.
+        const relink = new Map<string, string>();
         for (const track of p.tracks) {
           const additions: Clip[] = [];
           for (const clip of track.clips) {
-            if (!targets.includes(clip.id)) continue;
+            if (!targetSet.has(clip.id)) continue;
             const splitSource = timelineToSourceMs(clip, currentTimeMs);
             const right: Clip = {
               ...structuredClone(clip),
@@ -270,6 +372,14 @@ export function createClipsSlice(
               sourceInMs: splitSource,
               fadeInMs: 0,
             };
+            if (clip.linkId) {
+              let nextLink = relink.get(clip.linkId);
+              if (!nextLink) {
+                nextLink = uid('link');
+                relink.set(clip.linkId, nextLink);
+              }
+              right.linkId = nextLink;
+            }
             clip.sourceOutMs = splitSource;
             clip.fadeOutMs = 0;
             additions.push(right);
@@ -285,11 +395,13 @@ export function createClipsSlice(
 
     deleteClips: (clipIds, ripple) => {
       if (clipIds.length === 0) return;
+      // Deleting one side of an A/V link removes its partner too.
+      const targets = withLinkedIds(get().project, clipIds);
       withHistory((p) => {
         for (const track of p.tracks) {
           // Right-to-left so each ripple shift leaves the earlier targets in place.
           const doomed = track.clips
-            .filter((c) => clipIds.includes(c.id))
+            .filter((c) => targets.includes(c.id))
             .sort((a, b) => b.timelineStartMs - a.timelineStartMs);
           for (const clip of doomed) {
             const start = clip.timelineStartMs;
@@ -309,19 +421,60 @@ export function createClipsSlice(
     },
 
     duplicateClip: (clipId) => {
+      // Duplicate the whole linked group as a fresh pair (new shared linkId).
+      const ids = [clipId, ...linkedPartnerIds(get().project, clipId)];
+      const newLinkId = ids.length > 1 ? uid('link') : undefined;
       let newId = '';
       withHistory((p) => {
-        const found = findClip(p, clipId);
-        if (!found) return;
-        const copy: Clip = {
-          ...structuredClone(found.clip),
-          id: uid('clip'),
-          timelineStartMs: clipEndMs(found.clip),
-        };
-        newId = copy.id;
-        found.track.clips.push(copy);
+        for (const id of ids) {
+          const found = findClip(p, id);
+          if (!found) continue;
+          const copy: Clip = {
+            ...structuredClone(found.clip),
+            id: uid('clip'),
+            timelineStartMs: clipEndMs(found.clip),
+            ...(newLinkId ? { linkId: newLinkId } : {}),
+          };
+          if (id === clipId) newId = copy.id;
+          found.track.clips.push(copy);
+        }
       });
       if (newId) set({ selectedClipId: newId, selectedClipIds: [newId] });
+    },
+
+    unlinkClip: (clipId) => {
+      const partners = linkedPartnerIds(get().project, clipId);
+      if (partners.length === 0) return;
+      const ids = new Set([clipId, ...partners]);
+      withHistory((p) => {
+        for (const track of p.tracks) {
+          for (const clip of track.clips) {
+            if (!ids.has(clip.id)) continue;
+            // The extracted audio stays on the audio clip, so silence the video
+            // side (volume 0) - otherwise dropping the link would double the
+            // sound. The user can raise it again or delete either clip freely.
+            if (track.kind === 'video') clip.volume = 0;
+            delete clip.linkId;
+          }
+        }
+      });
+    },
+
+    linkClips: (clipIds) => {
+      const ids = new Set(clipIds);
+      if (ids.size < 2) return;
+      // Join the given clips into one A/V link (fresh shared linkId), so they
+      // move/trim/split/delete together again. The mix already mutes the video
+      // side of a link, so no volume change is needed here - if the video was
+      // silenced by a prior unlink it simply stays delegated.
+      const linkId = uid('link');
+      withHistory((p) => {
+        for (const track of p.tracks) {
+          for (const clip of track.clips) {
+            if (ids.has(clip.id)) clip.linkId = linkId;
+          }
+        }
+      });
     },
 
     punchZoomSelected: () => {

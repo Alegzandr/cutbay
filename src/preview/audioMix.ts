@@ -35,6 +35,9 @@ export function scheduleProjectAudio(
     const dest = typeof destination === 'function' ? destination(track.id) : destination;
     for (const clip of track.clips) {
       if (isGeneratedClip(clip)) continue;
+      // The video side of an A/V link delegates its audio to the linked audio
+      // clip; playing it here too would double the source.
+      if (track.kind === 'video' && clip.linkId) continue;
       if (clip.volume <= 0) continue;
       if (clipEndMs(clip) <= fromMs) continue;
       const buffer = getBuffer(clip.assetId);
