@@ -11,7 +11,6 @@ export function createTracksSlice(
   EditorState,
   | 'addTrack'
   | 'updateTrack'
-  | 'updateTrackCommitted'
   | 'removeTrack'
   | 'moveTrack'
   | 'toggleTrackMuted'
@@ -55,11 +54,5 @@ export function createTracksSlice(
       const tracks = p.tracks.map((t) => (t.id === trackId ? { ...t, ...patch } : t));
       set({ project: { ...p, tracks } });
     },
-
-    updateTrackCommitted: (trackId, patch) =>
-      withHistory((p) => {
-        const track = p.tracks.find((tr) => tr.id === trackId);
-        if (track) Object.assign(track, patch);
-      }),
   };
 }

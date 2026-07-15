@@ -52,11 +52,6 @@ export function clipZoomAt(clip: Clip, timelineMs: number): number {
   return 1 + (zoomEnd - 1) * progress;
 }
 
-/** Fade gain of a clip at a given timeline time (0..1), used for both opacity and audio. */
-export function clipFadeGainAt(clip: Clip, timelineMs: number): number {
-  return clipEnvelopeGainAt(clip, timelineMs, 0, 0);
-}
-
 /**
  * Fade gain including crossfade windows (overlap with neighboring clips).
  * A crossfade behaves like an implicit fade of the overlap duration; when the

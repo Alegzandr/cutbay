@@ -175,6 +175,7 @@
   "errors.media.noTrack": "No audio or video track in {{name}}",
   "errors.media.undecodableVideo": "Video codec cannot be decoded: {{name}}",
   "errors.media.unsupportedFormat": "Unsupported format: {{name}}",
+  "errors.persistence.saveFailed": "Your work could not be saved locally (storage full or blocked).",
 
   "unsupported.title": "{{app}} can't run in this browser",
   "unsupported.reason": "{{app}} relies on <api>WebCodecs</api> to decode and encode video entirely on your device - no upload, no server. This browser doesn't expose that API.",

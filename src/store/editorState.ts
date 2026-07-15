@@ -66,7 +66,6 @@ export interface EditorState {
   addTrack: (kind: Track['kind']) => void;
   /** Live track edit (volume/opacity slider drags) - wrap with begin/endGesture. */
   updateTrack: (trackId: string, patch: Partial<Track>) => void;
-  updateTrackCommitted: (trackId: string, patch: Partial<Track>) => void;
   removeTrack: (trackId: string) => void;
   moveTrack: (trackId: string, dir: -1 | 1) => void;
   toggleTrackMuted: (trackId: string) => void;

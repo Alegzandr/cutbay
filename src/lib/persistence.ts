@@ -1,6 +1,18 @@
 import { MediaAsset, Project } from '../types';
 import { useStore } from '../store/store';
 import { ensureAssetVisuals } from '../media/probe';
+import { t } from '../i18n';
+
+// Surface a save failure once per session: repeated debounced saves must not
+// spam the toast, but the user has to know their work is not being persisted
+// (storage full, or IndexedDB blocked in private mode).
+let saveErrorShown = false;
+function reportSaveFailure(err: unknown): void {
+  console.warn('[persistence] save failed:', err);
+  if (saveErrorShown) return;
+  saveErrorShown = true;
+  useStore.getState().setError(t('errors.persistence.saveFailed'));
+}
 
 /**
  * Project persistence in IndexedDB. The project structure and every imported
@@ -94,7 +106,7 @@ async function writeProject(project: Project): Promise<void> {
     const d = await db();
     d.transaction(PROJECT_STORE, 'readwrite').objectStore(PROJECT_STORE).put(project, PROJECT_KEY);
   } catch (err) {
-    console.warn('[persistence] project save failed:', err);
+    reportSaveFailure(err);
   }
 }
 
@@ -112,7 +124,7 @@ async function syncAssets(
       if (!(id in next)) store.delete(id);
     }
   } catch (err) {
-    console.warn('[persistence] asset save failed:', err);
+    reportSaveFailure(err);
   }
 }
 

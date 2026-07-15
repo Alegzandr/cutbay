@@ -5,7 +5,6 @@ import {
   timelineToSourceMs,
   projectDurationMs,
   clipEnvelopeGainAt,
-  clipFadeGainAt,
   clipZoomAt,
   trackCrossfades,
   outputDimensions,
@@ -76,9 +75,6 @@ describe('clipEnvelopeGainAt', () => {
   it('lets a crossfade window win over a shorter explicit fade', () => {
     const noFade = makeClip({ timelineStartMs: 0, sourceOutMs: 1000 });
     expect(clipEnvelopeGainAt(noFade, 200, 400, 0)).toBeCloseTo(0.5);
-  });
-  it('clipFadeGainAt matches the envelope with no crossfade', () => {
-    expect(clipFadeGainAt(clip, 100)).toBeCloseTo(clipEnvelopeGainAt(clip, 100, 0, 0));
   });
 });
 

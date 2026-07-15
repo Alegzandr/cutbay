@@ -164,6 +164,7 @@
   "errors.media.noTrack": "Nenhuma faixa de áudio ou vídeo em {{name}}",
   "errors.media.undecodableVideo": "O codec de vídeo não pode ser decodificado: {{name}}",
   "errors.media.unsupportedFormat": "Formato não suportado: {{name}}",
+  "errors.persistence.saveFailed": "Não foi possível salvar seu trabalho localmente (armazenamento cheio ou bloqueado).",
   "unsupported.title": "{{app}} não pode ser executado neste navegador",
   "unsupported.reason": "{{app}} depende de <api>WebCodecs</api> para decodificar e codificar vídeo inteiramente em seu dispositivo - sem upload, sem servidor. Este navegador não expõe essa API.",
   "unsupported.browsers": "Experimente uma versão recente de <name>Chrome</name>, <name>Edge</name> ou <name>Safari 16.4+</name>, por HTTPS.",
