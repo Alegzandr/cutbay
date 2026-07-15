@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { produce, setAutoFreeze } from 'immer';
 import {
   Clip,
   ClipTransform,
@@ -289,6 +290,11 @@ function findClip(project: Project, clipId: string): { track: Track; clip: Clip;
   return null;
 }
 
+// Keep produced projects mutable (the store treats project state as immutable
+// via copy-on-write, but some code paths still read-then-mutate a fresh copy,
+// matching the previous structuredClone semantics).
+setAutoFreeze(false);
+
 export const useStore = create<EditorState>((set, get) => {
   /**
    * Mutation recorded in history (one-shot operation). `priorityClipId`
@@ -297,10 +303,15 @@ export const useStore = create<EditorState>((set, get) => {
    */
   const withHistory = (fn: (p: Project) => void, priorityClipId?: string | null) => {
     const prev = get().project;
-    let next = structuredClone(prev);
-    fn(next);
+    // Immer's structural sharing: `fn` mutates a draft, but only the touched
+    // tracks/clips get a new identity - no full deep clone of the project per
+    // edit, and `prev` stays intact for undo.
+    const mutated = produce(prev, fn);
     // Every committed edit leaves the tracks in a legal layout (pairwise crossfades only).
-    next = resolveOverlaps(next, priorityClipId !== undefined ? priorityClipId : get().selectedClipId);
+    const next = resolveOverlaps(
+      mutated,
+      priorityClipId !== undefined ? priorityClipId : get().selectedClipId,
+    );
     set({
       project: next,
       past: [...get().past, prev].slice(-HISTORY_LIMIT),
