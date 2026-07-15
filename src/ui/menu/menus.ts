@@ -42,7 +42,9 @@ export function useContextMenuItems(target: ContextTarget): MenuEntry[] {
       .filter((e): e is MenuEntry => e !== null);
 
   switch (target.kind) {
-    case 'clip':
+    case 'clip': {
+      const clip = tracks.flatMap((tr) => tr.clips).find((c) => c.id === target.clipId);
+      const linked = clip?.linkId != null;
       return resolve([
         'edit.cut',
         'edit.copy',
@@ -52,10 +54,13 @@ export function useContextMenuItems(target: ContextTarget): MenuEntry[] {
         'clip.punchIn',
         'clip.stream',
         'clip.adjust',
+        // Only offered on an A/V-linked clip.
+        ...(linked ? ['clip.unlink'] : []),
         '---',
         'clip.delete',
         'clip.rippleDelete',
       ]);
+    }
 
     case 'timeline':
       return resolve([

@@ -53,6 +53,7 @@ export function createClipsSlice(
   | 'rippleDeleteClip'
   | 'deleteClips'
   | 'duplicateClip'
+  | 'unlinkClip'
   | 'punchZoomSelected'
   | 'addSubtitleClips'
   | 'applyStreamLayout'
@@ -438,6 +439,24 @@ export function createClipsSlice(
         }
       });
       if (newId) set({ selectedClipId: newId, selectedClipIds: [newId] });
+    },
+
+    unlinkClip: (clipId) => {
+      const partners = linkedPartnerIds(get().project, clipId);
+      if (partners.length === 0) return;
+      const ids = new Set([clipId, ...partners]);
+      withHistory((p) => {
+        for (const track of p.tracks) {
+          for (const clip of track.clips) {
+            if (!ids.has(clip.id)) continue;
+            // The extracted audio stays on the audio clip, so silence the video
+            // side (volume 0) - otherwise dropping the link would double the
+            // sound. The user can raise it again or delete either clip freely.
+            if (track.kind === 'video') clip.volume = 0;
+            delete clip.linkId;
+          }
+        }
+      });
     },
 
     punchZoomSelected: () => {

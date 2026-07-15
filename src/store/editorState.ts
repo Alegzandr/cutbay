@@ -122,6 +122,12 @@ export interface EditorState {
   /** Delete several clips as one undo step; ripple closes the gaps. */
   deleteClips: (clipIds: string[], ripple: boolean) => void;
   duplicateClip: (clipId: string) => void;
+  /**
+   * Break an A/V link: the video and audio clips become independent (they no
+   * longer move/trim/split/delete together). The audio keeps playing from the
+   * audio clip; the video side is muted (volume 0) so the sound is not doubled.
+   */
+  unlinkClip: (clipId: string) => void;
   copyClip: (clipId: string) => void;
   cutClip: (clipId: string) => void;
   pasteAtPlayhead: () => void;

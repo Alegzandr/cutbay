@@ -19,6 +19,7 @@ import {
   Square,
   StretchHorizontal,
   Type,
+  Unlink,
   Undo2,
   Keyboard,
   LayoutPanelTop,
@@ -71,6 +72,7 @@ export function useEditorCommands(): Record<string, Command> {
   const selectedClip = useStore(getSelectedClip);
   // Stream layout only makes sense on a real media clip (not text/solid overlays).
   const canStream = selectedClip !== null && selectedClip.assetId !== '';
+  const isLinked = selectedClip !== null && selectedClip.linkId != null;
 
   const st = useStore.getState;
 
@@ -103,6 +105,7 @@ export function useEditorCommands(): Record<string, Command> {
     { id: 'clip.punchIn', labelKey: 'menu.clip.punchIn', icon: ZoomIn, shortcut: 'P', onClick: () => st().punchZoomSelected() },
     { id: 'clip.stream', labelKey: 'menu.clip.stream', icon: LayoutPanelTop, disabled: !canStream, onClick: () => selectedId && st().applyStreamLayout(selectedId) },
     { id: 'clip.adjust', labelKey: 'menu.clip.adjust', icon: SlidersHorizontal, disabled: !selectedId, onClick: () => st().setInspectorOpen(true) },
+    { id: 'clip.unlink', labelKey: 'menu.clip.unlink', icon: Unlink, disabled: !isLinked, onClick: () => selectedId && st().unlinkClip(selectedId) },
     { id: 'clip.delete', labelKey: 'menu.clip.delete', icon: Scissors, shortcut: 'Del', danger: true, disabled: !hasSelection, onClick: () => st().deleteClips(st().selectedClipIds, false) },
     { id: 'clip.rippleDelete', labelKey: 'menu.clip.rippleDelete', icon: Scissors, shortcut: 'Shift+Del', danger: true, disabled: !hasSelection, onClick: () => st().deleteClips(st().selectedClipIds, true) },
 

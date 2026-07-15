@@ -143,6 +143,26 @@ describe('linked edits', () => {
     expect(total).toBe(0);
   });
 
+  it('unlinks into two independent, non-doubled clips', () => {
+    const { video } = pair();
+    s().unlinkClip(video.id);
+    const after = pair();
+    expect(after.video.linkId).toBeUndefined();
+    expect(after.audio.linkId).toBeUndefined();
+    // Audio stays on the audio clip; the video side is muted so sound is not doubled.
+    expect(after.video.volume).toBe(0);
+    expect(after.audio.volume).toBe(1);
+  });
+
+  it('leaves unlinked clips free to move on their own', () => {
+    const { video, audio } = pair();
+    s().unlinkClip(video.id);
+    s().moveClip(video.id, 3000);
+    const after = pair();
+    expect(after.video.timelineStartMs).toBe(3000);
+    expect(after.audio.timelineStartMs).toBe(audio.timelineStartMs); // unchanged
+  });
+
   it('duplicates the pair as a fresh link', () => {
     const { video } = pair();
     s().duplicateClip(video.id);

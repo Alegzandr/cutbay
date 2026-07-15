@@ -68,6 +68,7 @@
   "clip.fadeOut": "desvanecerse",
   "clip.text.placeholder": "Texto",
   "clipbar.adjust": "Ajustar",
+  "clipbar.unlink": "Desvincular",
   "clipbar.delete": "Eliminar",
   "clipbar.duplicate": "Duplicar",
   "clipbar.punchIn": "Perforar",
@@ -280,6 +281,7 @@
   "menu.clip.punchIn": "Zoom punch-in",
   "menu.clip.stream": "Diseño stream (facecam + gameplay)",
   "menu.clip.adjust": "Ajustar",
+  "menu.clip.unlink": "Desvincular audio",
   "menu.clip.delete": "Eliminar",
   "menu.clip.rippleDelete": "Eliminar y cerrar hueco",
 
