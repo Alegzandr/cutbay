@@ -39,6 +39,15 @@ export const TrackRow = memo(function TrackRow({ track, pxPerMs }: Props) {
       <div
         className={`sticky left-0 z-10 flex h-full items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-0.5 ${coarse ? 'w-11 justify-center' : 'px-1'}`}
         style={coarse ? undefined : { width: TRACK_HEADER_WIDTH_PX }}
+        onContextMenu={(e) => {
+          if (coarse) return; // Desktop only.
+          e.preventDefault();
+          e.stopPropagation();
+          useStore.getState().openContextMenu(e.clientX, e.clientY, {
+            kind: 'track',
+            trackId: track.id,
+          });
+        }}
       >
         <div className="flex flex-none flex-col items-center justify-center gap-0.5">
           <div className="flex items-center gap-0.5">

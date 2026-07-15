@@ -94,6 +94,8 @@ export const useStore = create<EditorState>((set, get) => {
     shortcutsOpen: false,
     preferencesOpen: false,
     aboutOpen: false,
+    contextMenu: null,
+    renamingMarkerId: null,
     timeFormat: loadTimeFormat(),
     clipboard: null,
     exportOpen: false,

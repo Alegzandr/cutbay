@@ -20,6 +20,7 @@ import { MobileBottomBar } from './ui/MobileBottomBar';
 import { ShortcutsHelp } from './ui/ShortcutsHelp';
 import { Preferences } from './ui/Preferences';
 import { About } from './ui/About';
+import { ContextMenu } from './ui/menu/ContextMenu';
 import { useEditorHotkeys } from './ui/useEditorHotkeys';
 import { useIsCoarsePointer } from './lib/device';
 
@@ -118,6 +119,7 @@ export default function App() {
       <ShortcutsHelp />
       <Preferences />
       <About />
+      {!coarse && <ContextMenu />}
       <Toast />
 
       <AnimatePresence>

@@ -57,12 +57,15 @@
   "track.volume": "Track volume - {{pct}}%",
   "track.meter.title": "Level (dB) - red dot = clipping",
 
-  "marker.barHint": "Drag to select a region · double-click a marker to rename · right-click to delete",
+  "marker.barHint": "Drag to select a region · double-click a marker to rename · right-click for options",
   "marker.placeholder": "Marker {{n}}",
   "marker.regionIn": "Region in point (I)",
   "marker.regionOut": "Region out point (O)",
-  "marker.title": "Marker {{n}} (double-click to rename, right-click to delete)",
-  "marker.titleLabeled": "Marker {{n}} - {{label}} (double-click to rename, right-click to delete)",
+  "marker.title": "Marker {{n}} (double-click to rename, right-click for options)",
+  "marker.titleLabeled": "Marker {{n}} - {{label}} (double-click to rename, right-click for options)",
+  "ctx.marker.goto": "Go to marker",
+  "ctx.marker.rename": "Rename…",
+  "ctx.marker.delete": "Delete marker",
 
   "clip.defaultText": "Title",
   "clip.solid.color": "Solid color",

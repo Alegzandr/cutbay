@@ -1,6 +1,7 @@
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../store/store';
+import { useIsCoarsePointer } from '../lib/device';
 import { Tooltip } from '../ui/Tooltip';
 import { Marker } from '../types';
 import { collectSnapPoints, snapTime } from './snapping';
@@ -53,10 +54,14 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
   // Subscribe to the markers only (not the whole project): a clip drag must not
   // re-render + re-sort the marker bar on every frame.
   const markerList = useStore((s) => s.project.markers);
-  const [editing, setEditing] = useState<Marker | null>(null);
+  const renamingMarkerId = useStore((s) => s.renamingMarkerId);
+  const coarse = useIsCoarsePointer();
   const drag = useRef<Drag | null>(null);
 
   const markers = useMemo(() => [...markerList].sort((a, b) => a.timeMs - b.timeMs), [markerList]);
+  // Inline label editor: which marker (if any) has it open lives in the store, so
+  // both a double-click and the right-click menu's "Rename" open the same input.
+  const editing = renamingMarkerId ? markers.find((m) => m.id === renamingMarkerId) ?? null : null;
   const xOf = (ms: number) => padLeft + ms * pxPerMs;
 
   /** Snap points, minus the position the drag currently owns (it must not stick to itself). */
@@ -148,7 +153,7 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
 
   const commitRename = (value: string) => {
     if (editing) useStore.getState().renameMarker(editing.id, value.trim());
-    setEditing(null);
+    useStore.getState().setRenamingMarker(null);
   };
 
   const handle = 'absolute inset-y-0 w-2.5 cursor-ew-resize touch-none bg-amber-400';
@@ -211,12 +216,16 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
             onPointerCancel={onPointerUp}
             onDoubleClick={(e) => {
               e.stopPropagation();
-              setEditing(marker);
+              useStore.getState().setRenamingMarker(marker.id);
             }}
             onContextMenu={(e) => {
+              if (coarse) return; // Desktop only.
               e.preventDefault();
               e.stopPropagation();
-              useStore.getState().removeMarker(marker.id);
+              useStore.getState().openContextMenu(e.clientX, e.clientY, {
+                kind: 'marker',
+                markerId: marker.id,
+              });
             }}
           >
             <span className="truncate">{marker.label || i + 1}</span>
@@ -238,7 +247,7 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
           onKeyDown={(e) => {
             e.stopPropagation();
             if (e.key === 'Enter') commitRename((e.target as HTMLInputElement).value);
-            else if (e.key === 'Escape') setEditing(null);
+            else if (e.key === 'Escape') useStore.getState().setRenamingMarker(null);
           }}
         />
       )}

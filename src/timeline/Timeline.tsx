@@ -126,7 +126,16 @@ export function Timeline() {
         >
           <MarkerBar pxPerMs={pxPerMs} />
           <Ruler durationMs={durationMs} pxPerMs={pxPerMs} overscanMs={coarse ? 0 : 30_000} />
-          <div onPointerDown={onBgPointerDown} onPointerMove={onBgPointerMove}>
+          <div
+            onPointerDown={onBgPointerDown}
+            onPointerMove={onBgPointerMove}
+            onContextMenu={(e) => {
+              // Only the empty track background: clips / headers open their own menus.
+              if (coarse || (e.target as HTMLElement).dataset.rowbg === undefined) return;
+              e.preventDefault();
+              useStore.getState().openContextMenu(e.clientX, e.clientY, { kind: 'timeline' });
+            }}
+          >
             {project.tracks.map((track) => (
               <TrackRow key={track.id} track={track} pxPerMs={pxPerMs} />
             ))}

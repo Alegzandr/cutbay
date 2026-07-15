@@ -230,6 +230,16 @@ export const ClipView = memo(function ClipView({
       onClick={() => {
         if (coarse && !selected) useStore.getState().selectClip(clip.id);
       }}
+      onContextMenu={(e) => {
+        if (coarse) return; // Desktop only: leave the native menu on touch long-press.
+        e.preventDefault();
+        e.stopPropagation();
+        const state = useStore.getState();
+        // Right-clicking outside the current selection selects this clip; a
+        // right-click inside a multi-selection keeps it, so "delete" hits all.
+        if (!state.selectedClipIds.includes(clip.id)) state.selectClip(clip.id);
+        state.openContextMenu(e.clientX, e.clientY, { kind: 'clip', clipId: clip.id });
+      }}
     >
       {clip.kind === 'text' ? (
         <div className="pointer-events-none flex h-full w-full items-center gap-1 bg-gradient-to-b from-violet-900/60 to-violet-950 px-1.5">

@@ -18,6 +18,9 @@ export function createUiSlice(
   | 'setShortcutsOpen'
   | 'setPreferencesOpen'
   | 'setAboutOpen'
+  | 'openContextMenu'
+  | 'closeContextMenu'
+  | 'setRenamingMarker'
   | 'setTimeFormat'
   | 'setExportOpen'
   | 'setError'
@@ -36,6 +39,12 @@ export function createUiSlice(
     setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
     setPreferencesOpen: (open) => set({ preferencesOpen: open }),
     setAboutOpen: (open) => set({ aboutOpen: open }),
+
+    openContextMenu: (x, y, target) => set({ contextMenu: { x, y, target } }),
+    closeContextMenu: () => {
+      if (get().contextMenu) set({ contextMenu: null });
+    },
+    setRenamingMarker: (markerId) => set({ renamingMarkerId: markerId }),
 
     setTimeFormat: (format) => {
       try {

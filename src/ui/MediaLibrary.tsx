@@ -107,6 +107,7 @@ export function reconnectAssetViaPicker(assetId: string): void {
 
 function AssetCard({ asset }: { asset: MediaAsset }) {
   const { t } = useTranslation();
+  const coarse = useIsCoarsePointer();
   const { addClipFromAsset, removeAsset } = useStore.getState();
   const isVideo = asset.kind === 'video';
   const disconnected = asset.disconnected;
@@ -121,6 +122,14 @@ function AssetCard({ asset }: { asset: MediaAsset }) {
         // Desktop: drag the asset straight onto a timeline position.
         e.dataTransfer.setData(ASSET_DRAG_MIME, asset.id);
         e.dataTransfer.effectAllowed = 'copy';
+      }}
+      onContextMenu={(e) => {
+        if (coarse) return; // Desktop only.
+        e.preventDefault();
+        useStore.getState().openContextMenu(e.clientX, e.clientY, {
+          kind: 'asset',
+          assetId: asset.id,
+        });
       }}
     >
       <div className="relative aspect-video w-full overflow-hidden bg-zinc-950">

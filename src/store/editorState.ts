@@ -13,6 +13,25 @@ export interface ClipboardEntry {
   kind: Track['kind'];
 }
 
+/**
+ * What the user right-clicked, so the shared `<ContextMenu>` can build the right
+ * item list. Only the target's identity is stored (never closures) - the menu
+ * resolves live commands from it at render, keeping enabled/checked flags fresh.
+ */
+export type ContextTarget =
+  | { kind: 'clip'; clipId: string }
+  | { kind: 'timeline' }
+  | { kind: 'marker'; markerId: string }
+  | { kind: 'track'; trackId: string }
+  | { kind: 'asset'; assetId: string };
+
+export interface ContextMenuState {
+  /** Viewport coordinates of the click (the menu anchors here, flipping at edges). */
+  x: number;
+  y: number;
+  target: ContextTarget;
+}
+
 export interface EditorState {
   project: Project;
   assets: Record<string, MediaAsset>;
@@ -44,6 +63,10 @@ export interface EditorState {
   preferencesOpen: boolean;
   /** About dialog (app name, version). */
   aboutOpen: boolean;
+  /** Open right-click menu (desktop), or null when none is showing. */
+  contextMenu: ContextMenuState | null;
+  /** Marker whose inline label editor is open (opened by dbl-click or the menu). */
+  renamingMarkerId: string | null;
   /** How the transport spells time out (persisted). */
   timeFormat: TimeFormat;
   clipboard: ClipboardEntry | null;
@@ -157,6 +180,11 @@ export interface EditorState {
   setShortcutsOpen: (open: boolean) => void;
   setPreferencesOpen: (open: boolean) => void;
   setAboutOpen: (open: boolean) => void;
+  /** Open the right-click menu for `target` at viewport coords (x, y). */
+  openContextMenu: (x: number, y: number, target: ContextTarget) => void;
+  closeContextMenu: () => void;
+  /** Open (id) or close (null) a marker's inline label editor. */
+  setRenamingMarker: (markerId: string | null) => void;
   setTimeFormat: (format: TimeFormat) => void;
   setExportOpen: (open: boolean) => void;
   setImporting: (v: boolean) => void;

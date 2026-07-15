@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ParseKeys } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { Check } from 'lucide-react';
 import logoUrl from '../assets/logo.png';
 import { APP_NAME } from '../app/config';
-import { useEditorCommands, type Command } from './commands';
+import { useEditorCommands } from './commands';
+import { MenuList, type MenuEntry } from './menu/MenuList';
 
 /**
  * Desktop menu bar (File / Edit / …). The menu *structure* lives here as ids
@@ -37,42 +37,6 @@ const MENUS: readonly Menu[] = [
   },
   { titleKey: 'menu.help', items: ['help.shortcuts', '---', 'help.about'] },
 ];
-
-function MenuItem({ command, onRun }: { command: Command | undefined; onRun: () => void }) {
-  const { t } = useTranslation();
-  if (!command) return null;
-  const Icon = command.icon;
-  const color = command.disabled
-    ? 'text-zinc-600'
-    : command.danger
-      ? 'text-red-300 hover:bg-red-500/10'
-      : 'text-zinc-200 hover:bg-zinc-800';
-  return (
-    <button
-      type="button"
-      disabled={command.disabled}
-      className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs ${color}`}
-      onClick={() => {
-        command.onClick();
-        onRun();
-      }}
-    >
-      <span className="flex h-4 w-4 flex-none items-center justify-center text-zinc-400">
-        {command.checked ? (
-          <Check className="h-3.5 w-3.5 text-sky-400" />
-        ) : Icon ? (
-          <Icon className="h-4 w-4" />
-        ) : null}
-      </span>
-      <span className="flex-1 whitespace-nowrap">{t(command.labelKey)}</span>
-      {command.shortcut && (
-        <span className="flex-none pl-4 font-mono text-[10px] tracking-tight text-zinc-500">
-          {command.shortcut}
-        </span>
-      )}
-    </button>
-  );
-}
 
 export function MenuBar() {
   const { t } = useTranslation();
@@ -121,13 +85,12 @@ export function MenuBar() {
             </button>
             {isOpen && (
               <div className="absolute left-0 top-full z-50 mt-0.5 min-w-56 rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-xl shadow-black/50">
-                {menu.items.map((item, i) =>
-                  item === '---' ? (
-                    <div key={`sep-${i}`} className="my-1 h-px bg-zinc-800" />
-                  ) : (
-                    <MenuItem key={item} command={commands[item]} onRun={() => setOpen(null)} />
-                  ),
-                )}
+                <MenuList
+                  items={menu.items
+                    .map((item): MenuEntry | null => (item === '---' ? '---' : commands[item] ?? null))
+                    .filter((e): e is MenuEntry => e !== null)}
+                  onRun={() => setOpen(null)}
+                />
               </div>
             )}
           </div>
