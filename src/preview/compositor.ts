@@ -1,6 +1,6 @@
 import type { VideoSample } from 'mediabunny';
-import { Clip, ClipText, SolidClip, TextClip } from '../types';
-import { DEFAULT_TRANSFORM, clipEnvelopeGainAt, clipZoomAt } from '../model';
+import { Clip, ClipText, SolidClip, TextClip, Track } from '../types';
+import { DEFAULT_TRANSFORM, clipEnvelopeGainAt, clipZoomAt, isTextClip, trackCrossfades } from '../model';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -218,4 +218,47 @@ export function clipsAt(clips: Clip[], tMs: number): Clip[] {
     if (tMs >= clip.timelineStartMs && tMs < clip.timelineStartMs + dur) visible.push(clip);
   }
   return visible.sort((a, b) => a.timelineStartMs - b.timelineStartMs);
+}
+
+/** A clip visible at a given time, paired with its crossfade ramp-in duration. */
+export interface VisibleClip {
+  clip: Clip;
+  xfadeInMs: number;
+}
+
+/**
+ * Visible clips of a video track at time t, each with its crossfade ramp-in, in
+ * draw order. Empty for non-video, hidden or empty tracks. Preview and export
+ * both iterate this, so they composite tracks identically.
+ */
+export function visibleVideoClips(track: Track, tMs: number): VisibleClip[] {
+  if (track.kind !== 'video' || track.hidden) return [];
+  const visible = clipsAt(track.clips, tMs);
+  if (visible.length === 0) return [];
+  const xfades = trackCrossfades(track.clips);
+  return visible.map((clip) => ({ clip, xfadeInMs: xfades.get(clip.id)?.inMs ?? 0 }));
+}
+
+/**
+ * Draw a single clip onto the frame, dispatching by kind - the one place clip-
+ * kind rendering is decided, shared by preview and export. Media clips need a
+ * decoded `sample` (null skips them); text and solid clips are self-contained.
+ */
+export function drawClip(
+  ctx: Ctx2D,
+  clip: Clip,
+  outW: number,
+  outH: number,
+  timelineMs: number,
+  alphaMul: number,
+  xfadeInMs: number,
+  sample: VideoSample | null,
+): void {
+  if (isTextClip(clip)) {
+    drawTextClip(ctx, clip, outW, outH, timelineMs, alphaMul, xfadeInMs);
+  } else if (clip.kind === 'solid') {
+    drawSolidClip(ctx, clip, outW, outH, timelineMs, alphaMul, xfadeInMs);
+  } else if (sample) {
+    drawClipSample(ctx, sample, clip, outW, outH, timelineMs, alphaMul, xfadeInMs);
+  }
 }

@@ -1,15 +1,9 @@
 import type { VideoSample, VideoSampleSink } from 'mediabunny';
 import { useStore, EditorState } from '../store/store';
 import { MediaAsset, Project } from '../types';
-import {
-  isTextClip,
-  outputDimensions,
-  projectDurationMs,
-  timelineToSourceMs,
-  trackCrossfades,
-} from '../model';
+import { outputDimensions, projectDurationMs, timelineToSourceMs } from '../model';
 import { createVideoSink, getAudioBuffer } from '../media/mediaCache';
-import { clipsAt, drawClipSample, drawSolidClip, drawTextClip } from './compositor';
+import { drawClip, visibleVideoClips } from './compositor';
 import { ScheduledSource, scheduleProjectAudio, stopScheduled } from './audioMix';
 import { TrackLevels, publishLevels } from './meterBus';
 
@@ -376,36 +370,24 @@ export class PlaybackEngine {
     // a track, an overlapping pair draws earliest-first - the incoming clip
     // composites over the outgoing one with rising alpha (crossfade).
     for (const track of state.project.tracks) {
-      if (track.kind !== 'video' || track.hidden) continue;
       const alphaMul = track.opacity ?? 1;
       if (alphaMul <= 0) continue;
-      const visible = clipsAt(track.clips, tMs);
-      if (visible.length === 0) continue;
-      const xfades = trackCrossfades(track.clips);
-
-      for (const clip of visible) {
-        const xfadeInMs = xfades.get(clip.id)?.inMs ?? 0;
-        if (isTextClip(clip)) {
-          drawTextClip(this.ctx, clip, w, h, tMs, alphaMul, xfadeInMs);
-          continue;
+      for (const { clip, xfadeInMs } of visibleVideoClips(track, tMs)) {
+        let sample: VideoSample | null = null;
+        if (clip.kind === 'media') {
+          const asset = state.assets[clip.assetId];
+          if (!asset) continue;
+          let cursor = this.cursors.get(clip.id);
+          if (!cursor) {
+            cursor = new FrameCursor(asset, () => {
+              this.videoDirty = true;
+            });
+            this.cursors.set(clip.id, cursor);
+          }
+          cursor.request(timelineToSourceMs(clip, tMs) / 1000, this.wasPlaying);
+          sample = cursor.sample;
         }
-        if (clip.kind === 'solid') {
-          drawSolidClip(this.ctx, clip, w, h, tMs, alphaMul, xfadeInMs);
-          continue;
-        }
-        const asset = state.assets[clip.assetId];
-        if (!asset) continue;
-
-        let cursor = this.cursors.get(clip.id);
-        if (!cursor) {
-          cursor = new FrameCursor(asset, () => {
-            this.videoDirty = true;
-          });
-          this.cursors.set(clip.id, cursor);
-        }
-        cursor.request(timelineToSourceMs(clip, tMs) / 1000, this.wasPlaying);
-        const sample = cursor.sample;
-        if (sample) drawClipSample(this.ctx, sample, clip, w, h, tMs, alphaMul, xfadeInMs);
+        drawClip(this.ctx, clip, w, h, tMs, alphaMul, xfadeInMs, sample);
       }
     }
   }

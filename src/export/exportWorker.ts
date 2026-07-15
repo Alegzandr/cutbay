@@ -16,8 +16,8 @@ import {
 import { registerAacEncoder } from '@mediabunny/aac-encoder';
 import { registerMp3Encoder } from '@mediabunny/mp3-encoder';
 import { Clip } from '../types';
-import { isTextClip, timelineToSourceMs, trackCrossfades } from '../model';
-import { clipsAt, drawClipSample, drawSolidClip, drawTextClip } from '../preview/compositor';
+import { timelineToSourceMs } from '../model';
+import { drawClip, visibleVideoClips } from '../preview/compositor';
 import type { Mp4Preset } from './presets';
 import { ExportErrorCode, ExportRequest, WorkerReply } from './protocol';
 
@@ -142,36 +142,24 @@ async function exportMp4(req: ExportRequest, preset: Mp4Preset): Promise<void> {
     ctx.fillRect(0, 0, width, height);
 
     for (const track of project.tracks) {
-      if (track.kind !== 'video' || track.hidden) continue;
       const alphaMul = track.opacity ?? 1;
       if (alphaMul <= 0) continue;
-      const visible = clipsAt(track.clips, tMs);
-      if (visible.length === 0) continue;
-      const xfades = trackCrossfades(track.clips);
-
       // Earliest-first: during a crossfade the incoming clip composites over
       // the outgoing one with rising alpha (same as the preview).
-      for (const clip of visible) {
-        const xfadeInMs = xfades.get(clip.id)?.inMs ?? 0;
-        if (isTextClip(clip)) {
-          drawTextClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs);
-          continue;
+      for (const { clip, xfadeInMs } of visibleVideoClips(track, tMs)) {
+        let sample: VideoSample | null = null;
+        if (clip.kind === 'media') {
+          const sink = await getSink(clip);
+          if (!sink) continue;
+          const sourceSec = timelineToSourceMs(clip, tMs) / 1000;
+          const decoded = await sink.getSample(Math.max(0, sourceSec));
+          if (decoded) {
+            lastSamples.get(clip.id)?.close();
+            lastSamples.set(clip.id, decoded);
+          }
+          sample = decoded ?? lastSamples.get(clip.id) ?? null;
         }
-        if (clip.kind === 'solid') {
-          drawSolidClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs);
-          continue;
-        }
-        const sink = await getSink(clip);
-        if (!sink) continue;
-
-        const sourceSec = timelineToSourceMs(clip, tMs) / 1000;
-        const sample = await sink.getSample(Math.max(0, sourceSec));
-        if (sample) {
-          lastSamples.get(clip.id)?.close();
-          lastSamples.set(clip.id, sample);
-        }
-        const toDraw = sample ?? lastSamples.get(clip.id) ?? null;
-        if (toDraw) drawClipSample(ctx, toDraw, clip, width, height, tMs, alphaMul, xfadeInMs);
+        drawClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs, sample);
       }
     }
 
