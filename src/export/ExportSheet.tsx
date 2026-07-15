@@ -24,7 +24,8 @@ export function ExportSheet() {
   const handleRef = useRef<ExportHandle | null>(null);
 
   const presets = presetsForAspect(aspectRatio);
-  const selected = presets.find((p) => p.id === selectedId) ?? presets[0];
+  // presetsForAspect always returns the aspect-agnostic mp3 presets, so it is never empty.
+  const selected = presets.find((p) => p.id === selectedId) ?? presets[0]!;
   const exportedRegion = region && regionOnly ? region : null;
 
   const close = () => {
@@ -110,12 +111,16 @@ export function ExportSheet() {
                         {t(preset.labelKey)}{preset.qualityKey && ` · ${t(preset.qualityKey)}`}
                       </div>
                       <div className="mt-0.5 text-xs text-zinc-500">
-                        {t(preset.descriptionKey, {
-                          fps: preset.fps,
-                          width: preset.width,
-                          height: preset.height,
-                          bitrate: preset.videoBitrate ? Math.round(preset.videoBitrate / 1_000_000) : Math.round(preset.audioBitrate / 1_000),
-                        })}
+                        {preset.kind === 'mp4'
+                          ? t(preset.descriptionKey, {
+                              fps: preset.fps,
+                              width: preset.width,
+                              height: preset.height,
+                              bitrate: Math.round(preset.videoBitrate / 1_000_000),
+                            })
+                          : t(preset.descriptionKey, {
+                              bitrate: Math.round(preset.audioBitrate / 1_000),
+                            })}
                       </div>
                     </button>
                   ))}

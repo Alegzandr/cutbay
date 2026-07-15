@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef } from 'react';
-import { Clip, MediaAsset, clipDurationMs } from '../types';
+import { Clip, MediaAsset } from '../types';
+import { clipDurationMs } from '../model';
 
 interface Props {
   asset: MediaAsset;
@@ -42,7 +43,7 @@ export const Waveform = memo(function Waveform({ asset, clip, widthPx, color }: 
       if (clip.fadeInMs > 0) fade = Math.min(fade, localMs / clip.fadeInMs);
       if (clip.fadeOutMs > 0) fade = Math.min(fade, (durMs - localMs) / clip.fadeOutMs);
       const gain = clip.volume * Math.max(0, Math.min(1, fade));
-      const bar = Math.max(2, peaks[idx] * gain * h);
+      const bar = Math.max(2, peaks[idx]! * gain * h);
       ctx.fillRect(x, (h - bar) / 2, 1, bar);
     }
   }, [

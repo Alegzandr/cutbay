@@ -15,8 +15,10 @@ import {
 } from 'mediabunny';
 import { registerAacEncoder } from '@mediabunny/aac-encoder';
 import { registerMp3Encoder } from '@mediabunny/mp3-encoder';
-import { Clip, isTextClip, timelineToSourceMs, trackCrossfades } from '../types';
-import { clipsAt, drawClipSample, drawSolidClip, drawTextClip } from '../preview/compositor';
+import { Clip } from '../types';
+import { timelineToSourceMs } from '../model';
+import { drawClip, visibleVideoClips } from '../preview/compositor';
+import type { Mp4Preset } from './presets';
 import { ExportErrorCode, ExportRequest, WorkerReply } from './protocol';
 
 /**
@@ -48,7 +50,7 @@ worker.onmessage = (e) => {
     try {
       if (e.data.type === 'export') {
         if (e.data.preset.kind === 'mp3') await exportMp3(e.data);
-        else await exportMp4(e.data);
+        else await exportMp4(e.data, e.data.preset);
       }
     } catch (err) {
       worker.postMessage(
@@ -64,10 +66,10 @@ function postProgress(value: number): void {
   worker.postMessage({ type: 'progress', value: Math.min(1, Math.max(0, value)) });
 }
 
-async function exportMp4(req: ExportRequest): Promise<void> {
-  const { project, preset, files, startMs, durationMs, audio } = req;
-  const width = preset.width!;
-  const height = preset.height!;
+async function exportMp4(req: ExportRequest, preset: Mp4Preset): Promise<void> {
+  const { project, files, startMs, durationMs, audio } = req;
+  const width = preset.width;
+  const height = preset.height;
 
   if (audio && !(await canEncodeAudio('aac'))) registerAacEncoder();
 
@@ -79,9 +81,13 @@ async function exportMp4(req: ExportRequest): Promise<void> {
 
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d')!;
+  // High-quality resampling so every export resolution (incl. 4K downscales and
+  // upscaled sources) gets the cleanest fit/crop/zoom, not the default 'low' pass.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   const videoSource = new CanvasSource(canvas, {
     codec: 'avc',
-    bitrate: preset.videoBitrate!,
+    bitrate: preset.videoBitrate,
   });
   output.addVideoTrack(videoSource);
 
@@ -136,36 +142,24 @@ async function exportMp4(req: ExportRequest): Promise<void> {
     ctx.fillRect(0, 0, width, height);
 
     for (const track of project.tracks) {
-      if (track.kind !== 'video' || track.hidden) continue;
       const alphaMul = track.opacity ?? 1;
       if (alphaMul <= 0) continue;
-      const visible = clipsAt(track.clips, tMs);
-      if (visible.length === 0) continue;
-      const xfades = trackCrossfades(track.clips);
-
       // Earliest-first: during a crossfade the incoming clip composites over
       // the outgoing one with rising alpha (same as the preview).
-      for (const clip of visible) {
-        const xfadeInMs = xfades.get(clip.id)?.inMs ?? 0;
-        if (isTextClip(clip)) {
-          drawTextClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs);
-          continue;
+      for (const { clip, xfadeInMs } of visibleVideoClips(track, tMs)) {
+        let sample: VideoSample | null = null;
+        if (clip.kind === 'media') {
+          const sink = await getSink(clip);
+          if (!sink) continue;
+          const sourceSec = timelineToSourceMs(clip, tMs) / 1000;
+          const decoded = await sink.getSample(Math.max(0, sourceSec));
+          if (decoded) {
+            lastSamples.get(clip.id)?.close();
+            lastSamples.set(clip.id, decoded);
+          }
+          sample = decoded ?? lastSamples.get(clip.id) ?? null;
         }
-        if (clip.solid) {
-          drawSolidClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs);
-          continue;
-        }
-        const sink = await getSink(clip);
-        if (!sink) continue;
-
-        const sourceSec = timelineToSourceMs(clip, tMs) / 1000;
-        const sample = await sink.getSample(Math.max(0, sourceSec));
-        if (sample) {
-          lastSamples.get(clip.id)?.close();
-          lastSamples.set(clip.id, sample);
-        }
-        const toDraw = sample ?? lastSamples.get(clip.id) ?? null;
-        if (toDraw) drawClipSample(ctx, toDraw, clip, width, height, tMs, alphaMul, xfadeInMs);
+        drawClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs, sample);
       }
     }
 
@@ -221,14 +215,14 @@ async function pushAudioMix(
 ): Promise<void> {
   const { channels, sampleRate } = audio;
   const numberOfChannels = channels.length;
-  const totalFrames = channels[0].length;
+  const totalFrames = channels[0]!.length;
   const chunkFrames = sampleRate;
 
   for (let offset = 0; offset < totalFrames; offset += chunkFrames) {
     const frames = Math.min(chunkFrames, totalFrames - offset);
     const data = new Float32Array(frames * numberOfChannels);
     for (let ch = 0; ch < numberOfChannels; ch++) {
-      data.set(channels[ch].subarray(offset, offset + frames), ch * frames);
+      data.set(channels[ch]!.subarray(offset, offset + frames), ch * frames);
     }
     const sample = new AudioSample({
       data,

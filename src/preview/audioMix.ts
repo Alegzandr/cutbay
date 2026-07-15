@@ -1,4 +1,5 @@
-import { Clip, Project, clipEndMs, clipEnvelopeGainAt, isGeneratedClip, trackCrossfades } from '../types';
+import { Clip, Project } from '../types';
+import { clipEndMs, clipEnvelopeGainAt, isGeneratedClip, trackCrossfades } from '../model';
 
 export interface ScheduledSource {
   source: AudioBufferSourceNode;

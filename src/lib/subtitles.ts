@@ -13,12 +13,13 @@ export function isSubtitleFile(file: File): boolean {
 function parseTimestamp(raw: string): number | null {
   const m = raw.trim().match(/^(?:(\d+):)?(\d+):(\d+)[.,](\d{1,3})$/);
   if (!m) return null;
-  const [, h = '0', min, s, frac] = m;
+  // Groups 2-4 (min, s, frac) are mandatory in the pattern; group 1 (h) is optional.
+  const h = m[1] ?? '0';
   return (
     Number(h) * 3_600_000 +
-    Number(min) * 60_000 +
-    Number(s) * 1000 +
-    Number(frac.padEnd(3, '0'))
+    Number(m[2]) * 60_000 +
+    Number(m[3]) * 1000 +
+    Number(m[4]!.padEnd(3, '0'))
   );
 }
 
@@ -43,9 +44,9 @@ export function parseSubtitles(content: string): SubtitleCue[] {
     if (lines.length === 0) continue;
     const timingIdx = lines.findIndex((l) => l.includes('-->'));
     if (timingIdx === -1) continue;
-    const [rawStart, rawEnd] = lines[timingIdx].split('-->');
+    const [rawStart, rawEnd] = lines[timingIdx]!.split('-->');
     // VTT allows settings after the end time ("00:02.000 line:0 align:start").
-    const startMs = parseTimestamp(rawStart);
+    const startMs = parseTimestamp(rawStart ?? '');
     const endMs = parseTimestamp((rawEnd ?? '').trim().split(/\s+/)[0] ?? '');
     if (startMs === null || endMs === null || endMs <= startMs) continue;
     const text = cleanText(lines.slice(timingIdx + 1));

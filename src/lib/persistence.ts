@@ -1,6 +1,18 @@
 import { MediaAsset, Project } from '../types';
 import { useStore } from '../store/store';
 import { ensureAssetVisuals } from '../media/probe';
+import { t } from '../i18n';
+
+// Surface a save failure once per session: repeated debounced saves must not
+// spam the toast, but the user has to know their work is not being persisted
+// (storage full, or IndexedDB blocked in private mode).
+let saveErrorShown = false;
+function reportSaveFailure(err: unknown): void {
+  console.warn('[persistence] save failed:', err);
+  if (saveErrorShown) return;
+  saveErrorShown = true;
+  useStore.getState().setError(t('errors.persistence.saveFailed'));
+}
 
 /**
  * Project persistence in IndexedDB. The project structure and every imported
@@ -70,12 +82,34 @@ function isValidAsset(a: unknown): a is MediaAsset {
   );
 }
 
+/**
+ * A persisted File is only a reference to the on-disk file. Between sessions
+ * that file can be moved, renamed or deleted, and any read then throws. Probe
+ * a single byte so we can flag the asset up front instead of letting every
+ * decode fail silently and leave the preview black.
+ */
+async function isFileReadable(file: File): Promise<boolean> {
+  try {
+    await file.slice(0, 1).arrayBuffer();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function loadPersisted(): Promise<{ project: Project; assets: MediaAsset[] } | null> {
   const d = await db();
   const tx = d.transaction([PROJECT_STORE, ASSETS_STORE], 'readonly');
   const project = await requestDone(tx.objectStore(PROJECT_STORE).get(PROJECT_KEY));
   if (!isValidProject(project)) return null;
-  const assets = (await requestDone(tx.objectStore(ASSETS_STORE).getAll())).filter(isValidAsset);
+  const stored = (await requestDone(tx.objectStore(ASSETS_STORE).getAll())).filter(isValidAsset);
+  // Flag every asset whose source file no longer reads (disconnected source).
+  const assets = await Promise.all(
+    stored.map(async (asset) => ({
+      ...asset,
+      disconnected: !(await isFileReadable(asset.file)),
+    })),
+  );
   return { project, assets };
 }
 
@@ -94,7 +128,7 @@ async function writeProject(project: Project): Promise<void> {
     const d = await db();
     d.transaction(PROJECT_STORE, 'readwrite').objectStore(PROJECT_STORE).put(project, PROJECT_KEY);
   } catch (err) {
-    console.warn('[persistence] project save failed:', err);
+    reportSaveFailure(err);
   }
 }
 
@@ -112,7 +146,7 @@ async function syncAssets(
       if (!(id in next)) store.delete(id);
     }
   } catch (err) {
-    console.warn('[persistence] asset save failed:', err);
+    reportSaveFailure(err);
   }
 }
 
@@ -134,7 +168,9 @@ export async function initPersistence(): Promise<void> {
     if (saved && pristine && (saved.project.tracks.length > 0 || saved.assets.length > 0)) {
       s.hydrate(saved.project, saved.assets);
       // Recompute anything saved before it finished (peaks, thumbnail strip).
-      for (const asset of saved.assets) ensureAssetVisuals(asset);
+      // Skip disconnected assets: their file cannot be read, so decoding would
+      // only throw - they wait for the user to reconnect the source.
+      for (const asset of saved.assets) if (!asset.disconnected) ensureAssetVisuals(asset, s);
     }
   } catch (err) {
     console.warn('[persistence] restore failed:', err);

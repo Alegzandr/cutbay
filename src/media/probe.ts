@@ -2,16 +2,28 @@ import { CanvasSink } from 'mediabunny';
 import { MediaAsset } from '../types';
 import { uid } from '../lib/id';
 import { createInput, expectedPeakBins, getInput, getPeaks, registerInput, warmAudio } from './mediaCache';
-import { useStore } from '../store/store';
 import { t } from '../i18n';
+
+/**
+ * Where computed visuals are committed. The store satisfies this structurally,
+ * so probe stays a pure media module with no store dependency (the caller owns
+ * the commit).
+ */
+export interface AssetVisualsSink {
+  setAssetPeaks: (assetId: string, peaks: number[]) => void;
+  setAssetThumbnails: (assetId: string, thumbnails: string[]) => void;
+}
 
 /**
  * Probe an imported file: metadata + a first quick thumbnail.
  * Throws an Error (displayable message) if the file cannot be read.
  * The full thumbnail strip and audio peaks are filled in later by
  * ensureAssetVisuals() so importing stays fast.
+ *
+ * `reuseId` keeps an existing asset's id (and therefore its clips) when
+ * reconnecting a source whose File reference went stale between sessions.
  */
-export async function probeFile(file: File): Promise<MediaAsset> {
+export async function probeFile(file: File, reuseId?: string): Promise<MediaAsset> {
   const input = createInput(file);
   if (!(await input.canRead())) {
     input.dispose();
@@ -36,7 +48,7 @@ export async function probeFile(file: File): Promise<MediaAsset> {
   }
 
   const asset: MediaAsset = {
-    id: uid('asset'),
+    id: reuseId ?? uid('asset'),
     file,
     kind: videoTrack ? 'video' : 'audio',
     durationMs,
@@ -70,18 +82,18 @@ export function targetThumbnailCount(durationMs: number): number {
 
 /**
  * Kick off whatever visual data the asset is missing (audio peaks, full
- * thumbnail strip) and push the results into the store when ready.
+ * thumbnail strip) and commit the results through `sink` when ready.
  * Called after import and after an IndexedDB restore.
  */
-export function ensureAssetVisuals(asset: MediaAsset): void {
+export function ensureAssetVisuals(asset: MediaAsset, sink: AssetVisualsSink): void {
   if (asset.hasAudio && (asset.peaks?.length ?? 0) < expectedPeakBins(asset.durationMs)) {
     void getPeaks(asset).then((peaks) => {
-      if (peaks) useStore.getState().setAssetPeaks(asset.id, peaks);
+      if (peaks) sink.setAssetPeaks(asset.id, peaks);
     });
   }
   if (asset.kind === 'video' && asset.thumbnails.length < targetThumbnailCount(asset.durationMs)) {
     void extractAssetThumbnails(asset).then((thumbs) => {
-      if (thumbs.length) useStore.getState().setAssetThumbnails(asset.id, thumbs);
+      if (thumbs.length) sink.setAssetThumbnails(asset.id, thumbs);
     });
   }
 }

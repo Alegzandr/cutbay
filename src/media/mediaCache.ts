@@ -133,13 +133,13 @@ async function streamPeaks(asset: MediaAsset): Promise<number[] | null> {
     for (let j = 0; j < data.length; j += stride) {
       const bin = Math.floor(((wrapped.timestamp + j / sr) / durationSec) * bins);
       if (bin < 0 || bin >= bins) continue;
-      const v = Math.abs(data[j]);
-      if (v > out[bin]) out[bin] = v;
+      const v = Math.abs(data[j]!);
+      if (v > out[bin]!) out[bin] = v;
     }
   }
 
   let max = 0;
   for (const v of out) if (v > max) max = v;
-  if (max > 0) for (let i = 0; i < bins; i++) out[i] /= max;
+  if (max > 0) for (let i = 0; i < bins; i++) out[i]! /= max;
   return out;
 }

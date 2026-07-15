@@ -1,4 +1,5 @@
-import { LoopRegion, MediaAsset, Project, clipEndMs, projectDurationMs } from '../types';
+import { LoopRegion, MediaAsset, Project } from '../types';
+import { clipEndMs, projectDurationMs } from '../model';
 import { AUDIO_SAMPLE_RATE } from '../app/config';
 import { t } from '../i18n';
 import { getAudioBuffer } from '../media/mediaCache';
