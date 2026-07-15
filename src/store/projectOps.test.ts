@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { resolveOverlaps, findClip, insertTrack, createEmptyProject } from './projectOps';
+import {
+  resolveOverlaps,
+  findClip,
+  insertTrack,
+  createEmptyProject,
+  linkedPartnerIds,
+  withLinkedIds,
+} from './projectOps';
 import type { MediaClip, Project, Track } from '../types';
 
 function clip(over: Partial<MediaClip> & { id: string }): MediaClip {
@@ -72,6 +79,33 @@ describe('findClip', () => {
     expect(found?.index).toBe(1);
     expect(found?.track.id).toBe('t1');
     expect(findClip(p, 'missing')).toBeNull();
+  });
+});
+
+describe('A/V link helpers', () => {
+  const linked = () =>
+    project([
+      { id: 'v1', kind: 'video', clips: [clip({ id: 'v', linkId: 'L' })] },
+      {
+        id: 'a1',
+        kind: 'audio',
+        clips: [clip({ id: 'a', trackId: 'a1', linkId: 'L' }), clip({ id: 'solo', trackId: 'a1' })],
+      },
+    ]);
+
+  it('finds the partner sharing a linkId across tracks', () => {
+    expect(linkedPartnerIds(linked(), 'v')).toEqual(['a']);
+    expect(linkedPartnerIds(linked(), 'a')).toEqual(['v']);
+  });
+
+  it('returns nothing for an unlinked clip', () => {
+    expect(linkedPartnerIds(linked(), 'solo')).toEqual([]);
+  });
+
+  it('expands a selection to include linked partners, without duplicates', () => {
+    expect(withLinkedIds(linked(), ['v']).sort()).toEqual(['a', 'v']);
+    expect(withLinkedIds(linked(), ['v', 'a']).sort()).toEqual(['a', 'v']);
+    expect(withLinkedIds(linked(), ['solo'])).toEqual(['solo']);
   });
 });
 

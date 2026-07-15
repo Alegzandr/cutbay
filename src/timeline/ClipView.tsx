@@ -1,6 +1,6 @@
 import { memo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Music, Type } from 'lucide-react';
+import { Link2, Music, Type } from 'lucide-react';
 import { Clip, MediaAsset } from '../types';
 import { clipDurationMs } from '../model';
 import { useStore } from '../store/store';
@@ -278,9 +278,20 @@ export const ClipView = memo(function ClipView({
             </div>
           )}
           <div className="absolute left-0 top-0 flex max-w-full items-center gap-1 px-1.5 py-0.5">
-            <Music className="h-3 w-3 flex-none text-emerald-300" />
+            {clip.linkId ? (
+              <Link2 className="h-3 w-3 flex-none text-emerald-300" />
+            ) : (
+              <Music className="h-3 w-3 flex-none text-emerald-300" />
+            )}
             <span className="truncate text-[10px] text-emerald-100">{asset?.file.name}</span>
           </div>
+        </div>
+      )}
+
+      {/* A/V-link badge: this video clip's audio lives on a linked audio clip. */}
+      {isVideo && clip.kind === 'media' && clip.linkId && (
+        <div className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-black/55 p-0.5">
+          <Link2 className="h-2.5 w-2.5 text-sky-200" />
         </div>
       )}
 

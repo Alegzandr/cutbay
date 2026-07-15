@@ -117,3 +117,26 @@ export function findClip(
   }
   return null;
 }
+
+/** Ids of the clips A/V-linked to `clipId` (same non-empty `linkId`), excluding it. */
+export function linkedPartnerIds(project: Project, clipId: string): string[] {
+  const linkId = findClip(project, clipId)?.clip.linkId;
+  if (!linkId) return [];
+  const out: string[] = [];
+  for (const track of project.tracks) {
+    for (const c of track.clips) {
+      if (c.id !== clipId && c.linkId === linkId) out.push(c.id);
+    }
+  }
+  return out;
+}
+
+/** Expand a set of clip ids to also include every A/V-linked partner. */
+export function withLinkedIds(project: Project, clipIds: Iterable<string>): string[] {
+  const set = new Set<string>();
+  for (const id of clipIds) {
+    set.add(id);
+    for (const partner of linkedPartnerIds(project, id)) set.add(partner);
+  }
+  return [...set];
+}

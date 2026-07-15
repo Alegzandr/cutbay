@@ -112,6 +112,13 @@ interface BaseClip {
   pan?: number;
   /** Downmix the clip's audio to mono. */
   mono?: boolean;
+  /**
+   * A/V link: a video clip and the audio clip extracted from the same source on
+   * import share one `linkId`. Linked clips move, trim, split and delete
+   * together. The audio lives on the audio clip, so the video side of a link
+   * delegates its audio (it stays silent in the mix). Undefined = not linked.
+   */
+  linkId?: string;
   transform?: ClipTransform;
   /**
    * Animated zoom (Ken Burns): scale multiplier reached at the END of the
