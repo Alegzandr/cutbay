@@ -30,12 +30,21 @@ export interface CrossfadeWindows {
   outMs: number;
 }
 
+// Memoized by the clips-array identity: copy-on-write means an unchanged track
+// keeps its array reference across frames, so the 60fps preview and the export
+// loop reuse the result instead of re-sorting + reallocating every frame; a
+// touched track gets a new array and recomputes. WeakMap so entries are GC'd
+// with their track. Callers only read the returned map, never mutate it.
+const crossfadeCache = new WeakMap<Clip[], Map<string, CrossfadeWindows>>();
+
 /**
  * Crossfades of a track, derived purely from clip overlap: when two
  * consecutive clips overlap, the incoming clip ramps in and the outgoing
  * clip ramps out over the shared region (Vegas-style transition by sliding).
  */
 export function trackCrossfades(clips: Clip[]): Map<string, CrossfadeWindows> {
+  const cached = crossfadeCache.get(clips);
+  if (cached) return cached;
   const out = new Map<string, CrossfadeWindows>();
   const sorted = [...clips].sort((a, b) => a.timelineStartMs - b.timelineStartMs);
   for (const c of sorted) out.set(c.id, { inMs: 0, outMs: 0 });
@@ -48,6 +57,7 @@ export function trackCrossfades(clips: Clip[]): Map<string, CrossfadeWindows> {
     out.get(prev.id)!.outMs = Math.max(out.get(prev.id)!.outMs, window);
     out.get(cur.id)!.inMs = Math.max(out.get(cur.id)!.inMs, window);
   }
+  crossfadeCache.set(clips, out);
   return out;
 }
 
