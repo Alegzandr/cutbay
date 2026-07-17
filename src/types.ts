@@ -63,6 +63,12 @@ export interface MediaAsset {
   durationMs: number;
   width?: number;
   height?: number;
+  /**
+   * Average source frame rate (video only), measured at import. Drives the
+   * adaptive export frame rate so a 30 fps project exports at 30, not an
+   * up-sampled 60. Undefined when unknown (audio, or an old persisted asset).
+   */
+  fps?: number;
   /** Whether the asset has at least one decodable audio track (== audioTracks.length > 0). */
   hasAudio: boolean;
   /**

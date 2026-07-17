@@ -1,4 +1,4 @@
-import { AspectRatio } from '../types';
+import { AspectRatio, MediaAsset, Project } from '../types';
 import { APP_NAME, PROJECT_FPS } from '../app/config';
 import type { ParseKeys } from 'i18next';
 
@@ -40,11 +40,12 @@ export interface Mp3Preset extends BaseExportPreset {
 export type ExportPreset = Mp4Preset | Mp3Preset;
 
 export const PRESETS: ExportPreset[] = [
-  // Video bitrates target the platforms' published upload recommendations at
-  // 60 fps (the project frame rate). YouTube's own SDR figures for 48-60 fps are
-  // the reference: 720p 7.5, 1080p 12, 1440p 24, 4K 53-68 Mbps. Vertical/square
-  // presets mirror the equivalent pixel counts; the platforms cap display at
-  // 1080p and re-encode, so a generous source only improves their output.
+  // Each preset's videoBitrate is the HIGH-frame-rate (48-60 fps) figure; a
+  // standard-rate export scales it down (see videoBitrateForFps). The references
+  // are YouTube's published SDR recommendations: 720p 7.5, 1080p 12, 1440p 24,
+  // 4K 53-68 Mbps. Vertical/square presets mirror the equivalent pixel counts;
+  // the platforms cap display at 1080p and re-encode, so a generous source only
+  // improves their output.
   ...videoPresets('youtube', 'export.preset.youtube.label', '16:9', [
     ['720', 1280, 720, 7_500_000],
     ['1080', 1920, 1080, 12_000_000],
@@ -116,6 +117,69 @@ function audioPresets(id: string, qualities: readonly AudioQuality[]): Mp3Preset
 
 export function presetsForAspect(aspect: AspectRatio): ExportPreset[] {
   return PRESETS.filter((p) => p.kind === 'mp3' || p.aspect === aspect);
+}
+
+/**
+ * Frame rates an export is snapped to. Capped at the project rate (60): we never
+ * synthesize frames the timeline doesn't have. NTSC rates (23.976, 29.97, 59.94)
+ * land on their integer neighbour.
+ */
+const EXPORT_FPS_LADDER = [24, 25, 30, 50, 60] as const;
+
+/** YouTube's split: at/above 48 fps an upload wants the full "high frame rate" bitrate. */
+const HIGH_FPS_THRESHOLD = 48;
+
+/** Snap a measured source frame rate to the nearest rate we export at. */
+export function normalizeExportFps(sourceFps: number): number {
+  if (!isFinite(sourceFps) || sourceFps <= 0) return PROJECT_FPS;
+  return EXPORT_FPS_LADDER.reduce((best, rate) =>
+    Math.abs(rate - sourceFps) < Math.abs(best - sourceFps) ? rate : best,
+  );
+}
+
+/**
+ * The frame rate to export a project at: the fastest source among its video
+ * clips (so 60 fps footage stays smooth while an all-30 fps project exports at
+ * 30, not an up-sampled 60), snapped to the ladder. Falls back to the project
+ * rate when no source frame rate is known (generated-only project, or assets
+ * imported before frame-rate probing).
+ */
+export function projectExportFps(project: Project, assets: Record<string, MediaAsset>): number {
+  let fastest = 0;
+  for (const track of project.tracks) {
+    if (track.kind !== 'video') continue;
+    for (const clip of track.clips) {
+      if (clip.kind !== 'media') continue;
+      const fps = assets[clip.assetId]?.fps;
+      if (fps && fps > fastest) fastest = fps;
+    }
+  }
+  return fastest > 0 ? normalizeExportFps(fastest) : PROJECT_FPS;
+}
+
+/**
+ * Video bitrate for a given export frame rate. Presets carry YouTube's
+ * high-frame-rate figure; a standard-rate upload (24-30 fps) wants ~2/3 of it,
+ * matching YouTube's own SFR/HFR split (e.g. 1080p 8 vs 12 Mbps) across every
+ * resolution.
+ */
+export function videoBitrateForFps(preset: Mp4Preset, fps: number): number {
+  return fps >= HIGH_FPS_THRESHOLD ? preset.videoBitrate : Math.round((preset.videoBitrate * 2) / 3);
+}
+
+/**
+ * Resolve a video preset against a project: overrides the reference frame rate
+ * and bitrate with the values actually used for this project's source footage.
+ * The export worker and the export sheet both go through here, so the sheet
+ * always previews exactly what will be encoded.
+ */
+export function resolveMp4Preset(
+  preset: Mp4Preset,
+  project: Project,
+  assets: Record<string, MediaAsset>,
+): Mp4Preset {
+  const fps = projectExportFps(project, assets);
+  return { ...preset, fps, videoBitrate: videoBitrateForFps(preset, fps) };
 }
 
 export function exportFileName(preset: ExportPreset): string {

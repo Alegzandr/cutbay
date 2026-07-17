@@ -4,7 +4,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import { CheckCircle2, Download, Loader2, X, XCircle } from 'lucide-react';
 import { useStore } from '../store/store';
 import { formatTime } from '../lib/time';
-import { presetsForAspect, ExportPreset } from './presets';
+import { presetsForAspect, projectExportFps, videoBitrateForFps, ExportPreset } from './presets';
 import { startExport, downloadBlob, ExportHandle } from './exporter';
 
 type Phase =
@@ -16,7 +16,9 @@ type Phase =
 export function ExportSheet() {
   const { t } = useTranslation();
   const open = useStore((s) => s.exportOpen);
-  const aspectRatio = useStore((s) => s.project.aspectRatio);
+  const project = useStore((s) => s.project);
+  const assets = useStore((s) => s.assets);
+  const aspectRatio = project.aspectRatio;
   const region = useStore((s) => s.loopRegion);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [regionOnly, setRegionOnly] = useState(true);
@@ -26,6 +28,9 @@ export function ExportSheet() {
   const presets = presetsForAspect(aspectRatio);
   // presetsForAspect always returns the aspect-agnostic mp3 presets, so it is never empty.
   const selected = presets.find((p) => p.id === selectedId) ?? presets[0]!;
+  // Frame rate (and thus bitrate) adapt to the source footage; preview the exact
+  // figures the exporter will use.
+  const exportFps = projectExportFps(project, assets);
   const exportedRegion = region && regionOnly ? region : null;
 
   const close = () => {
@@ -50,7 +55,6 @@ export function ExportSheet() {
   }, [open, phase.kind]);
 
   const run = (preset: ExportPreset) => {
-    const { project, assets } = useStore.getState();
     setPhase({ kind: 'rendering', progress: 0 });
     const handle = startExport(
       project,
@@ -113,10 +117,10 @@ export function ExportSheet() {
                       <div className="mt-0.5 text-xs text-zinc-500">
                         {preset.kind === 'mp4'
                           ? t(preset.descriptionKey, {
-                              fps: preset.fps,
+                              fps: exportFps,
                               width: preset.width,
                               height: preset.height,
-                              bitrate: Math.round(preset.videoBitrate / 1_000_000),
+                              bitrate: Math.round(videoBitrateForFps(preset, exportFps) / 1_000_000),
                             })
                           : t(preset.descriptionKey, {
                               bitrate: Math.round(preset.audioBitrate / 1_000),
