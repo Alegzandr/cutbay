@@ -12,6 +12,7 @@ export function createUiSlice(
   EditorState,
   | 'toggleSnap'
   | 'setSnapGuide'
+  | 'setDragBadge'
   | 'setPxPerSec'
   | 'setTimelinePadLeft'
   | 'setInspectorOpen'
@@ -31,6 +32,12 @@ export function createUiSlice(
 
     setSnapGuide: (ms) => {
       if (get().snapGuideMs !== ms) set({ snapGuideMs: ms });
+    },
+
+    setDragBadge: (badge) => {
+      const cur = get().dragBadge;
+      if (cur?.clipId === badge?.clipId && cur?.text === badge?.text) return;
+      set({ dragBadge: badge });
     },
 
     setPxPerSec: (v) => set({ pxPerSec: clamp(v, MIN_PX_PER_SEC, MAX_PX_PER_SEC) }),

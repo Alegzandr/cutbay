@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link2, Music, Type } from 'lucide-react';
 import { Clip, MediaAsset } from '../types';
@@ -73,6 +73,9 @@ interface DragState {
   scrollerEl: HTMLElement | null;
 }
 
+/** "+m:ss.d" / "−m:ss.d" - the badge's signed delta since the press. */
+const signedMs = (v: number) => `${v < 0 ? '−' : '+'}${formatTime(Math.abs(v))}`;
+
 interface Props {
   clip: Clip;
   trackKind: 'video' | 'audio';
@@ -146,8 +149,10 @@ export const ClipView = memo(function ClipView({
   const longPress = useRef<{ timer: number; x: number; y: number } | null>(null);
   /** Teardown for per-drag listeners (Escape cancel, touch scroll blocker). */
   const sessionCleanup = useRef<(() => void) | null>(null);
-  /** Mode of the in-flight drag - drives the floating time badge. */
-  const [liveDragMode, setLiveDragMode] = useState<DragState['mode'] | null>(null);
+  /** This clip's floating drag readout (store-held, so it survives a remount). */
+  const dragBadgeText = useStore((s) =>
+    s.dragBadge?.clipId === clip.id ? s.dragBadge.text : null,
+  );
 
   // Unmount cleanup - EXCEPT for a window-driven move session: switching
   // tracks remounts this component mid-gesture, and the session (window
@@ -185,8 +190,9 @@ export const ClipView = memo(function ClipView({
     sessionCleanup.current = null;
     if (autoScrollRaf.current != null) cancelAnimationFrame(autoScrollRaf.current);
     autoScrollRaf.current = null;
-    useStore.getState().setSnapGuide(null);
-    setLiveDragMode(null);
+    const state = useStore.getState();
+    state.setSnapGuide(null);
+    state.setDragBadge(null);
     drag.current = null;
   };
 
@@ -225,6 +231,13 @@ export const ClipView = memo(function ClipView({
     // a cross-track remount, but the content element lives for the whole drag.
     const toMs = (x: number) =>
       d.contentEl ? msFromContentX(d.contentEl, x) : msFromClientX(d.el, x);
+    // Post-edit clip values for the badge, read fresh from the store (the
+    // `clip` prop can be a stale snapshot after a cross-track remount).
+    const findLive = (id: string) =>
+      useStore
+        .getState()
+        .project.tracks.flatMap((t) => t.clips)
+        .find((c) => c.id === id);
 
     if (d.mode === 'move') {
       // Pointer-anchored: the grabbed spot stays glued under the pointer even
@@ -262,10 +275,24 @@ export const ClipView = memo(function ClipView({
 
         state.moveClip(d.targetClipId, proposed, targetTrackId);
       }
+      const moved = findLive(d.targetClipId);
+      if (moved) {
+        state.setDragBadge({
+          clipId: d.targetClipId,
+          text: `${formatTime(moved.timelineStartMs)} (${signedMs(moved.timelineStartMs - d.origStartMs)})`,
+        });
+      }
     } else if (d.mode === 'slip') {
       // Slip: dragging right shows earlier media (the source window slides left).
       const dx = clientX - d.startX;
       state.slipClip(d.targetClipId, d.origSourceInMs - (dx / pxMs) * clip.speed);
+      const slipped = findLive(d.targetClipId);
+      if (slipped) {
+        state.setDragBadge({
+          clipId: d.targetClipId,
+          text: signedMs(slipped.sourceInMs - d.origSourceInMs),
+        });
+      }
     } else if (d.mode === 'fade-in' || d.mode === 'fade-out') {
       // Fade handles: drag inward from a clip edge to fade from/to black (and silence).
       const tMs = toMs(clientX);
@@ -290,12 +317,27 @@ export const ClipView = memo(function ClipView({
         const delta = clamp(cut - d.roll.edge0Ms, d.roll.minDelta, d.roll.maxDelta);
         state.trimClip(d.roll.leftId, 'right', d.roll.origLeftEndMs + delta);
         state.trimClip(d.roll.rightId, 'left', d.roll.origRightStartMs + delta);
+        // Badge: the cut point's position and how far it rolled.
+        state.setDragBadge({
+          clipId: clip.id,
+          text: `${formatTime(d.roll.edge0Ms + delta)} (${signedMs(delta)})`,
+        });
         return;
       }
       const tMs = hapticOnSnap(raw, snapTime(raw, d.points, snapThresholdMs), d);
       state.setSnapGuide(tMs !== raw ? tMs : null);
+      const trimBadge = () => {
+        const trimmed = findLive(clip.id);
+        if (!trimmed) return;
+        const dur = clipDurationMs(trimmed);
+        state.setDragBadge({
+          clipId: clip.id,
+          text: `${formatTime(dur)} (${signedMs(dur - d.durMs)})`,
+        });
+      };
       if (!d.ripple) {
         state.trimClip(clip.id, d.mode === 'trim-left' ? 'left' : 'right', tMs);
+        trimBadge();
         return;
       }
       // Ripple trim: downstream clips keep their distance to the edited edge.
@@ -334,6 +376,7 @@ export const ClipView = memo(function ClipView({
           ...d.ripple.map((r) => ({ clipId: r.id, timelineStartMs: r.startMs - removedMs })),
         ]);
       }
+      trimBadge();
     }
   };
 
@@ -423,7 +466,6 @@ export const ClipView = memo(function ClipView({
           state.loopRegion,
         );
       }
-      setLiveDragMode(d.mode);
       startAutoScroll();
     }
     d.moved = true;
@@ -520,23 +562,7 @@ export const ClipView = memo(function ClipView({
       scrollerEl: el.closest<HTMLElement>('.timeline-scroller'),
     };
     attachWindowDrag(pointerId);
-    setLiveDragMode('move');
     startAutoScroll();
-  };
-
-  /** Floating badge: position (move), cut point (roll), duration (trim) or source offset (slip) + delta. */
-  const badgeText = () => {
-    const d = drag.current;
-    if (!d) return '';
-    const signed = (v: number) => `${v < 0 ? '−' : '+'}${formatTime(Math.abs(v))}`;
-    if (d.mode === 'move')
-      return `${formatTime(clip.timelineStartMs)} (${signed(clip.timelineStartMs - d.origStartMs)})`;
-    if (d.mode === 'slip') return signed(clip.sourceInMs - d.origSourceInMs);
-    if (d.roll) {
-      const edge = d.mode === 'trim-right' ? clipEndMs(clip) : clip.timelineStartMs;
-      return `${formatTime(edge)} (${signed(edge - d.roll.edge0Ms)})`;
-    }
-    return `${formatTime(durMs)} (${signed(durMs - d.durMs)})`;
   };
 
   const beginDrag = (e: React.PointerEvent, mode: DragState['mode']) => {
@@ -808,12 +834,13 @@ export const ClipView = memo(function ClipView({
         </div>
       )}
 
-      {/* Live drag readout: position (move), duration (trim) or source offset
-          (slip) with the delta since the press - CapCut's trim bubble and the
-          pro-NLE numeric feedback in one. */}
-      {liveDragMode && liveDragMode !== 'fade-in' && liveDragMode !== 'fade-out' && (
+      {/* Live drag readout: position (move), cut point (roll), duration (trim)
+          or source offset (slip) with the delta since the press - CapCut's trim
+          bubble and the pro-NLE numeric feedback in one. Store-held so it
+          survives the remount when the drag crosses onto another track. */}
+      {dragBadgeText && (
         <div className="pointer-events-none absolute left-1/2 top-1 z-30 -translate-x-1/2 whitespace-nowrap rounded bg-zinc-950/85 px-1.5 py-0.5 font-mono text-[10px] leading-tight text-zinc-100 shadow">
-          {badgeText()}
+          {dragBadgeText}
         </div>
       )}
 

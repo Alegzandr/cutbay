@@ -56,6 +56,12 @@ export interface EditorState {
   snapEnabled: boolean;
   /** Timeline time (ms) a drag is currently snapped to - drawn as a guide line. */
   snapGuideMs: number | null;
+  /**
+   * Floating readout of the in-flight drag (position/duration/offset + delta),
+   * keyed to the edited clip. Lives in the store - not in the clip's component -
+   * so it survives the remount when a drag crosses onto another track.
+   */
+  dragBadge: { clipId: string; text: string } | null;
   /** Mobile only: the inspector opens on demand (Adjust button), not on every selection. */
   inspectorOpen: boolean;
   /** Mobile only: the media library lives in a drawer (desktop docks it permanently). */
@@ -190,6 +196,8 @@ export interface EditorState {
   redo: () => void;
   /** Publish/clear the snap guide line while a drag is snapped to a point. */
   setSnapGuide: (ms: number | null) => void;
+  /** Publish/clear the floating drag readout for a clip. */
+  setDragBadge: (badge: { clipId: string; text: string } | null) => void;
 
   seek: (ms: number) => void;
   setCurrentTimeFromEngine: (ms: number) => void;
