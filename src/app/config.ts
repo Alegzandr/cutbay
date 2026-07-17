@@ -21,6 +21,26 @@ export const DEFAULT_PX_PER_SEC = 60;
 /** Sample rate of the audio mix (preview + export). */
 export const AUDIO_SAMPLE_RATE = 48000;
 
+/**
+ * Preview playback resolution, à la the "playback/timeline resolution" control
+ * in Vegas / Premiere. Each rung composites the monitor at a fraction of the
+ * export size (cheaper); when a rung still can't keep up the engine drops
+ * frames with audio as the clock, so the picture never changes sharpness
+ * mid-playback. A manual pick - no mid-playback resolution pumping.
+ */
+export type PreviewResolutionMode = 'full' | 'half' | 'quarter' | 'eighth';
+
+/** Render scale (fraction of the full output size) for each rung. */
+export const PREVIEW_RESOLUTION_SCALE: Record<PreviewResolutionMode, number> = {
+  full: 1,
+  half: 1 / 2,
+  quarter: 1 / 4,
+  eighth: 1 / 8,
+};
+
+/** Default preview resolution: half the export size (sharp on screen, cheap). */
+export const DEFAULT_PREVIEW_RESOLUTION: PreviewResolutionMode = 'half';
+
 /** DataTransfer type used to drag an asset from the media library to the timeline. */
 export const ASSET_DRAG_MIME = 'application/x-selfcut-asset';
 

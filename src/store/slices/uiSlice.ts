@@ -2,7 +2,7 @@ import type { StoreSet, StoreGet, SliceHelpers } from '../sliceHelpers';
 import type { EditorState } from '../editorState';
 import { clamp } from '../../lib/time';
 import { MIN_PX_PER_SEC, MAX_PX_PER_SEC } from '../../app/config';
-import { TIME_FORMAT_KEY } from '../constants';
+import { TIME_FORMAT_KEY, PREVIEW_RESOLUTION_KEY } from '../constants';
 
 export function createUiSlice(
   set: StoreSet,
@@ -22,6 +22,7 @@ export function createUiSlice(
   | 'closeContextMenu'
   | 'setRenamingMarker'
   | 'setTimeFormat'
+  | 'setPreviewResolution'
   | 'setExportOpen'
   | 'setError'
 > {
@@ -53,6 +54,15 @@ export function createUiSlice(
         /* private mode / no storage - the choice just won't persist */
       }
       set({ timeFormat: format });
+    },
+
+    setPreviewResolution: (mode) => {
+      try {
+        localStorage.setItem(PREVIEW_RESOLUTION_KEY, mode);
+      } catch {
+        /* private mode / no storage - the choice just won't persist */
+      }
+      set({ previewResolution: mode });
     },
 
     setExportOpen: (open) => set({ exportOpen: open }),

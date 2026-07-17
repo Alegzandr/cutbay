@@ -2,11 +2,19 @@ import type { VideoSample } from 'mediabunny';
 import { useStore, EditorState } from '../store/store';
 import { Project } from '../types';
 import { outputDimensions, projectDurationMs, timelineToSourceMs } from '../model';
+import { PREVIEW_RESOLUTION_SCALE } from '../app/config';
 import { audioKey, getAudioBuffer } from '../media/mediaCache';
 import { FrameCursor } from './FrameCursor';
 import { drawClip, visibleVideoClips } from './compositor';
 import { ScheduledSource, scheduleProjectAudio, stopScheduled } from './audioMix';
 import { TrackLevels, publishLevels } from './meterBus';
+
+/**
+ * After the playhead stops, delay before the paused still is re-rendered at full
+ * resolution (draft while scrubbing so weak machines stay responsive, sharp once
+ * it settles). Matches Premiere's "Paused Resolution = Full".
+ */
+const PREVIEW_PAUSE_SETTLE_MS = 140;
 
 interface TrackBus {
   /** Summing bus of the track's clips (post clip & track volume). */
@@ -36,6 +44,11 @@ export class PlaybackEngine {
   private lastDrawnMs = -1;
   private raf = 0;
   private disposed = false;
+
+  /** Render scale the last painted frame used - a rung change alone forces a repaint. */
+  private lastRenderScale = 0;
+  /** performance.now() of the last frame-time change (drives the paused-still refine). */
+  private lastFrameChangeAt = 0;
 
   private wasPlaying = false;
   private lastSeekVersion: number;
@@ -198,13 +211,25 @@ export class PlaybackEngine {
       state.setCurrentTimeFromEngine(t);
     }
 
-    // Idle (paused, no new frame, no edit): skip the repaint entirely.
-    if (this.videoDirty || t !== this.lastDrawnMs) {
+    // Preview resolution: composite at the chosen rung while playing. A rung
+    // that still can't keep up is absorbed by frame dropping (audio is the
+    // clock), so the picture never changes sharpness mid-playback. The paused
+    // still refines to full resolution once the playhead settles (draft while
+    // scrubbing, sharp when it stops) - the Premiere "Paused Resolution = Full".
+    const rung = PREVIEW_RESOLUTION_SCALE[state.previewResolution];
+    const now = performance.now();
+    const renderScale =
+      !this.wasPlaying && now - this.lastFrameChangeAt > PREVIEW_PAUSE_SETTLE_MS ? 1 : rung;
+
+    // Repaint on a new frame, an edit, OR a resolution change (same frame, new rung).
+    if (this.videoDirty || t !== this.lastDrawnMs || renderScale !== this.lastRenderScale) {
+      if (t !== this.lastDrawnMs) this.lastFrameChangeAt = now;
       this.videoDirty = false;
       this.lastDrawnMs = t;
+      this.lastRenderScale = renderScale;
       // A single bad frame must never kill the preview loop.
       try {
-        this.draw(state, t);
+        this.draw(state, t, renderScale);
       } catch (err) {
         console.warn('[preview] draw failed, frame dropped:', err);
       }
@@ -213,11 +238,12 @@ export class PlaybackEngine {
     this.raf = requestAnimationFrame(this.tick);
   };
 
-  private draw(state: EditorState, tMs: number): void {
+  private draw(state: EditorState, tMs: number, scale: number): void {
     const { width, height } = outputDimensions(state.project.aspectRatio);
-    // Preview renders at half resolution - plenty for on-screen display.
-    const w = width / 2;
-    const h = height / 2;
+    // Composite at a fraction of the export size - cheaper, and the browser
+    // upscales the backing store to fill the monitor.
+    const w = Math.max(2, Math.round(width * scale));
+    const h = Math.max(2, Math.round(height * scale));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
