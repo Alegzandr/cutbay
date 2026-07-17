@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PRESETS, presetsForAspect, exportFileName } from './presets';
+import type { Mp4Preset } from './presets';
 
 describe('presetsForAspect', () => {
   it('returns the matching video presets plus the aspect-agnostic audio ones', () => {
@@ -22,6 +23,32 @@ describe('presetsForAspect', () => {
       expect(p.labelKey).toBeTruthy();
       expect(p.descriptionKey).toBeTruthy();
       expect(p.kind === 'mp4' || p.kind === 'mp3').toBe(true);
+    }
+  });
+});
+
+describe('bitrates meet the platforms’ upload recommendations', () => {
+  const mp4 = (id: string): Mp4Preset => {
+    const preset = PRESETS.find((p) => p.id === id);
+    expect(preset, `missing preset ${id}`).toBeDefined();
+    expect(preset!.kind).toBe('mp4');
+    return preset as Mp4Preset;
+  };
+
+  // The project exports at 60 fps, so YouTube's 48-60 fps SDR figures are the
+  // reference floor (720p 7.5, 1080p 12, 1440p 24, 4K 53-68 Mbps).
+  it.each([
+    ['youtube-720', 7_500_000],
+    ['youtube-1080', 12_000_000],
+    ['youtube-1440', 24_000_000],
+    ['youtube-4k', 53_000_000],
+  ])('%s meets the YouTube 60fps SDR floor', (id, floor) => {
+    expect(mp4(id).videoBitrate).toBeGreaterThanOrEqual(floor);
+  });
+
+  it('every video preset ships 384 kbps AAC (YouTube AAC-LC recommendation)', () => {
+    for (const p of PRESETS) {
+      if (p.kind === 'mp4') expect(p.audioBitrate).toBeGreaterThanOrEqual(384_000);
     }
   });
 });

@@ -40,29 +40,34 @@ export interface Mp3Preset extends BaseExportPreset {
 export type ExportPreset = Mp4Preset | Mp3Preset;
 
 export const PRESETS: ExportPreset[] = [
+  // Video bitrates target the platforms' published upload recommendations at
+  // 60 fps (the project frame rate). YouTube's own SDR figures for 48-60 fps are
+  // the reference: 720p 7.5, 1080p 12, 1440p 24, 4K 53-68 Mbps. Vertical/square
+  // presets mirror the equivalent pixel counts; the platforms cap display at
+  // 1080p and re-encode, so a generous source only improves their output.
   ...videoPresets('youtube', 'export.preset.youtube.label', '16:9', [
-    ['720', 1280, 720, 5_000_000],
+    ['720', 1280, 720, 7_500_000],
     ['1080', 1920, 1080, 12_000_000],
     ['1440', 2560, 1440, 24_000_000],
-    ['4k', 3840, 2160, 45_000_000],
+    ['4k', 3840, 2160, 60_000_000],
   ]),
   ...videoPresets('tiktok', 'export.preset.tiktok.label', '9:16', [
-    ['720', 720, 1280, 5_000_000],
+    ['720', 720, 1280, 7_500_000],
     ['1080', 1080, 1920, 12_000_000],
     ['1440', 1440, 2560, 24_000_000],
-    ['4k', 2160, 3840, 45_000_000],
+    ['4k', 2160, 3840, 60_000_000],
   ]),
   ...videoPresets('square', 'export.preset.square.label', '1:1', [
     ['720', 720, 720, 5_000_000],
     ['1080', 1080, 1080, 8_000_000],
     ['1440', 1440, 1440, 16_000_000],
-    ['4k', 2160, 2160, 30_000_000],
+    ['4k', 2160, 2160, 35_000_000],
   ]),
   ...videoPresets('portrait45', 'export.preset.portrait45.label', '4:5', [
     ['720', 576, 720, 5_000_000],
     ['1080', 1080, 1350, 9_000_000],
     ['1440', 1152, 1440, 16_000_000],
-    ['4k', 2160, 2700, 30_000_000],
+    ['4k', 2160, 2700, 40_000_000],
   ]),
   ...audioPresets('mp3', [
     ['128', 128_000],
@@ -91,7 +96,9 @@ function videoPresets(
     height,
     fps: PROJECT_FPS,
     videoBitrate,
-    audioBitrate: 192_000,
+    // 384 kbps AAC-LC stereo @ 48 kHz — YouTube's recommended audio spec, high
+    // enough that the platforms' re-encode stays clean.
+    audioBitrate: 384_000,
   }));
 }
 
