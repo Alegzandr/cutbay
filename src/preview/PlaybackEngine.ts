@@ -2,6 +2,11 @@ import type { VideoSample } from 'mediabunny';
 import { useStore, EditorState } from '../store/store';
 import { Project } from '../types';
 import { outputDimensions, projectDurationMs, timelineToSourceMs } from '../model';
+import {
+  PREVIEW_AUTO_LADDER,
+  PREVIEW_AUTO_DEFAULT_SCALE,
+  PREVIEW_RESOLUTION_SCALE,
+} from '../app/config';
 import { audioKey, getAudioBuffer } from '../media/mediaCache';
 import { FrameCursor } from './FrameCursor';
 import { drawClip, visibleVideoClips } from './compositor';
@@ -15,6 +20,25 @@ interface TrackBus {
   analyser: AnalyserNode;
   data: Float32Array<ArrayBuffer>;
 }
+
+/**
+ * Auto-resolution controller tuning. The signal is the wall-clock cost of one
+ * composite pass (the work preview resolution actually governs - decode cost is
+ * independent of canvas size), smoothed into an EMA. Coming down a rung is
+ * cheap and quick (protect fluidity); climbing back up is slower and needs
+ * sustained headroom, so the picture only sharpens when the machine can hold it.
+ */
+const AUTO_EMA_ALPHA = 0.15;
+/** Sustained composite cost above this (ms) drops to a coarser rung. */
+const AUTO_UP_MS = 9;
+/** Sustained composite cost below this (ms) allows a finer rung. */
+const AUTO_DOWN_MS = 3.5;
+/** Consecutive slow frames before dropping a rung. */
+const AUTO_OVER_FRAMES = 10;
+/** Consecutive comfortable frames before climbing a rung. */
+const AUTO_UNDER_FRAMES = 45;
+/** After the playhead stops, delay before Auto refines the still to full res (ms). */
+const PREVIEW_SETTLE_MS = 180;
 
 
 /**
@@ -37,6 +61,18 @@ export class PlaybackEngine {
   private raf = 0;
   private disposed = false;
 
+  // --- Preview resolution (Auto controller + paused-still refinement) -------
+  /** Scale the Auto rung sits at (fraction of full output size). */
+  private autoScale = PREVIEW_AUTO_DEFAULT_SCALE;
+  /** EMA of the per-frame composite cost (ms) driving the Auto rung. */
+  private drawEma = 0;
+  private autoOver = 0;
+  private autoUnder = 0;
+  /** Scale the last painted frame used - a change alone forces a repaint. */
+  private lastRenderScale = 0;
+  /** performance.now() of the last frame-time change (drives the settle refine). */
+  private lastFrameChangeAt = 0;
+
   private wasPlaying = false;
   private lastSeekVersion: number;
   private lastProject: Project;
@@ -54,6 +90,10 @@ export class PlaybackEngine {
     const state = useStore.getState();
     this.lastSeekVersion = state.seekVersion;
     this.lastProject = state.project;
+    // Resume the Auto rung the previous engine settled on (survives remounts).
+    if (state.previewResolution === 'auto' && state.previewActiveScale > 0) {
+      this.autoScale = state.previewActiveScale;
+    }
     this.raf = requestAnimationFrame(this.tick);
   }
 
@@ -198,13 +238,33 @@ export class PlaybackEngine {
       state.setCurrentTimeFromEngine(t);
     }
 
-    // Idle (paused, no new frame, no edit): skip the repaint entirely.
-    if (this.videoDirty || t !== this.lastDrawnMs) {
+    // --- Preview resolution: choose the render scale, adapt in Auto mode. ----
+    const mode = state.previewResolution;
+    const now = performance.now();
+    // Rung reported to the UI: the one Auto settled on, or the fixed pick.
+    const reportScale = mode === 'auto' ? this.autoScale : PREVIEW_RESOLUTION_SCALE[mode];
+    state.setPreviewActiveScale(reportScale);
+
+    // Scale actually painted. Auto renders a crisp full-res still once the
+    // playhead settles (draft while scrubbing, sharp when it stops), like a
+    // pro monitor; fixed rungs render at their rung throughout.
+    let renderScale = reportScale;
+    if (mode === 'auto' && !this.wasPlaying) {
+      renderScale = now - this.lastFrameChangeAt > PREVIEW_SETTLE_MS ? 1 : this.autoScale;
+    }
+
+    // Repaint on a new frame, an edit, OR a resolution change (same frame, new scale).
+    if (this.videoDirty || t !== this.lastDrawnMs || renderScale !== this.lastRenderScale) {
+      if (t !== this.lastDrawnMs) this.lastFrameChangeAt = now;
       this.videoDirty = false;
       this.lastDrawnMs = t;
+      this.lastRenderScale = renderScale;
       // A single bad frame must never kill the preview loop.
       try {
-        this.draw(state, t);
+        const t0 = performance.now();
+        this.draw(state, t, renderScale);
+        // Adapt only on true playback frames drawn at the adaptive rung.
+        if (mode === 'auto' && this.wasPlaying) this.adaptAuto(performance.now() - t0);
       } catch (err) {
         console.warn('[preview] draw failed, frame dropped:', err);
       }
@@ -213,11 +273,50 @@ export class PlaybackEngine {
     this.raf = requestAnimationFrame(this.tick);
   };
 
-  private draw(state: EditorState, tMs: number): void {
+  /**
+   * Feed one measured composite cost into the Auto controller and step the rung.
+   * Down-steps react fast (protect fluidity); up-steps need sustained headroom.
+   */
+  private adaptAuto(drawMs: number): void {
+    this.drawEma =
+      this.drawEma <= 0 ? drawMs : this.drawEma * (1 - AUTO_EMA_ALPHA) + drawMs * AUTO_EMA_ALPHA;
+    if (this.drawEma > AUTO_UP_MS) {
+      this.autoOver++;
+      this.autoUnder = 0;
+    } else if (this.drawEma < AUTO_DOWN_MS) {
+      this.autoUnder++;
+      this.autoOver = 0;
+    } else {
+      this.autoOver = 0;
+      this.autoUnder = 0;
+    }
+
+    const idx = PREVIEW_AUTO_LADDER.indexOf(
+      this.autoScale as (typeof PREVIEW_AUTO_LADDER)[number],
+    );
+    if (idx < 0) {
+      this.autoScale = PREVIEW_AUTO_DEFAULT_SCALE;
+    } else if (this.autoOver >= AUTO_OVER_FRAMES && idx < PREVIEW_AUTO_LADDER.length - 1) {
+      this.stepAuto(PREVIEW_AUTO_LADDER[idx + 1]!);
+    } else if (this.autoUnder >= AUTO_UNDER_FRAMES && idx > 0) {
+      this.stepAuto(PREVIEW_AUTO_LADDER[idx - 1]!);
+    }
+  }
+
+  private stepAuto(scale: number): void {
+    this.autoScale = scale;
+    this.autoOver = 0;
+    this.autoUnder = 0;
+    // Reseed the EMA neutrally so the new rung is measured fresh (no instant reverse).
+    this.drawEma = (AUTO_UP_MS + AUTO_DOWN_MS) / 2;
+  }
+
+  private draw(state: EditorState, tMs: number, scale: number): void {
     const { width, height } = outputDimensions(state.project.aspectRatio);
-    // Preview renders at half resolution - plenty for on-screen display.
-    const w = width / 2;
-    const h = height / 2;
+    // Composite at a fraction of the export size - cheaper, and the browser
+    // upscales the backing store to fill the monitor.
+    const w = Math.max(2, Math.round(width * scale));
+    const h = Math.max(2, Math.round(height * scale));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;

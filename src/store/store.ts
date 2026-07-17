@@ -4,8 +4,15 @@ import { Clip, LoopRegion, Marker, Project } from '../types';
 import { clipDurationMs, clipEndMs, projectDurationMs, sortedMarkers } from '../model';
 import { createEmptyProject, linkableSelection, resolveOverlaps } from './projectOps';
 import { type TimeFormat } from '../lib/time';
-import { DEFAULT_PX_PER_SEC, TIMELINE_PAD_LEFT } from '../app/config';
-import { HISTORY_LIMIT, TIME_FORMAT_KEY } from './constants';
+import {
+  DEFAULT_PX_PER_SEC,
+  TIMELINE_PAD_LEFT,
+  DEFAULT_PREVIEW_RESOLUTION,
+  PREVIEW_AUTO_DEFAULT_SCALE,
+  PREVIEW_RESOLUTION_SCALE,
+  type PreviewResolutionMode,
+} from '../app/config';
+import { HISTORY_LIMIT, TIME_FORMAT_KEY, PREVIEW_RESOLUTION_KEY } from './constants';
 import type { EditorState } from './editorState';
 import { createProjectSlice } from './slices/projectSlice';
 import { createAssetsSlice } from './slices/assetsSlice';
@@ -26,6 +33,16 @@ function loadTimeFormat(): TimeFormat {
     /* private mode / no storage - fall through to the default */
   }
   return 'timecode';
+}
+
+function loadPreviewResolution(): PreviewResolutionMode {
+  try {
+    const v = localStorage.getItem(PREVIEW_RESOLUTION_KEY);
+    if (v === 'auto' || v === 'full' || v === 'half' || v === 'quarter' || v === 'eighth') return v;
+  } catch {
+    /* private mode / no storage - fall through to the default */
+  }
+  return DEFAULT_PREVIEW_RESOLUTION;
 }
 
 export type { EditorState } from './editorState';
@@ -75,6 +92,8 @@ export const useStore = create<EditorState>((set, get) => {
 
   const helpers = { withHistory, pruneSelection };
 
+  const previewResolution = loadPreviewResolution();
+
   return {
     project: createEmptyProject(),
     assets: {},
@@ -97,6 +116,11 @@ export const useStore = create<EditorState>((set, get) => {
     contextMenu: null,
     renamingMarkerId: null,
     timeFormat: loadTimeFormat(),
+    previewResolution,
+    previewActiveScale:
+      previewResolution === 'auto'
+        ? PREVIEW_AUTO_DEFAULT_SCALE
+        : PREVIEW_RESOLUTION_SCALE[previewResolution],
     clipboard: null,
     exportOpen: false,
     importing: false,

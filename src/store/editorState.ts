@@ -7,6 +7,7 @@ import {
   AspectRatio,
 } from '../types';
 import type { TimeFormat } from '../lib/time';
+import type { PreviewResolutionMode } from '../app/config';
 
 export interface ClipboardEntry {
   clip: Clip;
@@ -69,6 +70,14 @@ export interface EditorState {
   renamingMarkerId: string | null;
   /** How the transport spells time out (persisted). */
   timeFormat: TimeFormat;
+  /** Preview playback resolution the user picked (persisted). */
+  previewResolution: PreviewResolutionMode;
+  /**
+   * Scale the preview is actually rendering at (fraction of full output size),
+   * published by the playback engine. In Auto mode it tracks the rung the
+   * adaptive controller settled on, so the UI can show "Auto · ½".
+   */
+  previewActiveScale: number;
   clipboard: ClipboardEntry | null;
   exportOpen: boolean;
   importing: boolean;
@@ -199,6 +208,10 @@ export interface EditorState {
   /** Open (id) or close (null) a marker's inline label editor. */
   setRenamingMarker: (markerId: string | null) => void;
   setTimeFormat: (format: TimeFormat) => void;
+  /** Pick the preview resolution rung (or Auto); persisted. */
+  setPreviewResolution: (mode: PreviewResolutionMode) => void;
+  /** Engine-only: report the scale the preview is currently rendering at. */
+  setPreviewActiveScale: (scale: number) => void;
   setExportOpen: (open: boolean) => void;
   setImporting: (v: boolean) => void;
   setError: (msg: string | null) => void;

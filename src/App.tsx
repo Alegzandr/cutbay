@@ -11,6 +11,7 @@ import { Transport } from './ui/Transport';
 import { Toast } from './ui/Toast';
 import { UnsupportedScreen, isSupported } from './ui/UnsupportedScreen';
 import { PreviewCanvas } from './preview/PreviewCanvas';
+import { PreviewQualityMenu } from './preview/PreviewQualityMenu';
 import { Timeline } from './timeline/Timeline';
 import { Inspector } from './inspector/Inspector';
 import { ExportSheet } from './export/ExportSheet';
@@ -106,6 +107,7 @@ export default function App() {
         <div className="relative min-w-0 flex-1">
           <PreviewCanvas />
           <ImportingBadge />
+          <PreviewQualityMenu />
         </div>
         {!coarse && <Inspector />}
       </div>

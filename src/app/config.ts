@@ -21,6 +21,31 @@ export const DEFAULT_PX_PER_SEC = 60;
 /** Sample rate of the audio mix (preview + export). */
 export const AUDIO_SAMPLE_RATE = 48000;
 
+/**
+ * Preview playback resolution, à la the "playback/timeline resolution" control
+ * in Premiere / DaVinci Resolve. Fixed rungs render the monitor at a fraction of
+ * the export size (cheaper to composite); `auto` lets the engine pick the rung
+ * that keeps playback fluid on the current machine.
+ */
+export type PreviewResolutionMode = 'auto' | 'full' | 'half' | 'quarter' | 'eighth';
+
+/** Render scale (fraction of the full output size) for each fixed rung. */
+export const PREVIEW_RESOLUTION_SCALE: Record<Exclude<PreviewResolutionMode, 'auto'>, number> = {
+  full: 1,
+  half: 1 / 2,
+  quarter: 1 / 4,
+  eighth: 1 / 8,
+};
+
+/** Descending scale ladder the Auto controller steps through. */
+export const PREVIEW_AUTO_LADDER = [1, 1 / 2, 1 / 4, 1 / 8] as const;
+
+/** Auto starts here (a safe middle rung) before it measures and adapts. */
+export const PREVIEW_AUTO_DEFAULT_SCALE = 1 / 2;
+
+/** Default preview resolution: Auto adapts to the machine out of the box. */
+export const DEFAULT_PREVIEW_RESOLUTION: PreviewResolutionMode = 'auto';
+
 /** DataTransfer type used to drag an asset from the media library to the timeline. */
 export const ASSET_DRAG_MIME = 'application/x-selfcut-asset';
 
