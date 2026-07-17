@@ -246,6 +246,7 @@
   "shortcuts.edit.marquee": "Selección con rectángulo",
   "shortcuts.edit.slip": "Slip: deslizar el medio dentro del clip",
   "shortcuts.edit.rippleTrim": "Recorte ripple (los clips siguientes se desplazan)",
+  "shortcuts.edit.rollEdit": "Roll: mover el punto de corte (ambos clips)",
   "shortcuts.edit.selectAll": "Selecciona cada clip",
   "shortcuts.edit.delete": "Eliminar los clips seleccionados",
   "shortcuts.edit.rippleDelete": "Eliminación ondulada (cerrar la brecha)",

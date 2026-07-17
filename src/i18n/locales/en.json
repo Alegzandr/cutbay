@@ -265,6 +265,7 @@
   "shortcuts.edit.marquee": "Box-select clips",
   "shortcuts.edit.slip": "Slip: slide the media inside the clip",
   "shortcuts.edit.rippleTrim": "Ripple trim (downstream clips follow)",
+  "shortcuts.edit.rollEdit": "Roll the cut point (both clips)",
   "shortcuts.edit.selectAll": "Select every clip",
   "shortcuts.edit.delete": "Delete the selected clips",
   "shortcuts.edit.rippleDelete": "Ripple delete (close the gap)",

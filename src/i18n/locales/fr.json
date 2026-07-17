@@ -246,6 +246,7 @@
   "shortcuts.edit.marquee": "Sélection au lasso (rectangle)",
   "shortcuts.edit.slip": "Slip : faire glisser le média dans le clip",
   "shortcuts.edit.rippleTrim": "Rognage ripple (les clips suivants suivent)",
+  "shortcuts.edit.rollEdit": "Roll : déplacer le point de coupe (les deux clips)",
   "shortcuts.edit.selectAll": "Sélectionnez chaque clip",
   "shortcuts.edit.delete": "Supprimer les clips sélectionnés",
   "shortcuts.edit.rippleDelete": "Suppression d'ondulation (combler l'écart)",

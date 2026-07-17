@@ -246,6 +246,7 @@
   "shortcuts.edit.marquee": "Clips per Rahmen auswählen",
   "shortcuts.edit.slip": "Slip: Medien im Clip verschieben",
   "shortcuts.edit.rippleTrim": "Ripple-Trimmen (nachfolgende Clips folgen)",
+  "shortcuts.edit.rollEdit": "Schnittpunkt rollen (beide Clips)",
   "shortcuts.edit.selectAll": "Wählen Sie jeden Clip aus",
   "shortcuts.edit.delete": "Löschen Sie die ausgewählten Clips",
   "shortcuts.edit.rippleDelete": "Ripple löschen (Lücke schließen)",

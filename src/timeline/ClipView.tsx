@@ -2,13 +2,15 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link2, Music, Type } from 'lucide-react';
 import { Clip, MediaAsset } from '../types';
-import { audioTrackForClip, clipDurationMs } from '../model';
+import { audioTrackForClip, clipDurationMs, clipEndMs } from '../model';
 import { useStore } from '../store/store';
 import { Tooltip } from '../ui/Tooltip';
 import { collectSnapPoints, snapMove, snapTime } from './snapping';
 import { msFromClientX, msFromContentX, timelineContentEl } from './coords';
 import {
+  MARKER_BAR_HEIGHT_PX,
   MIN_CLIP_DURATION_MS,
+  RULER_HEIGHT_PX,
   SNAP_THRESHOLD_PX,
   TRACK_HEADER_WIDTH_PX,
   TRACK_HEIGHT_PX,
@@ -44,6 +46,31 @@ interface DragState {
   origSourceOutMs: number;
   /** Ripple trim (Ctrl on a trim handle): same-track downstream clips and their original starts. */
   ripple: { id: string; startMs: number }[] | null;
+  /**
+   * Roll edit (Alt on a trim handle at a true edit point): the two clips
+   * around the cut and the delta bounds allowed by both source windows.
+   */
+  roll: {
+    leftId: string;
+    rightId: string;
+    origLeftEndMs: number;
+    origRightStartMs: number;
+    /** The grabbed edge's original position - deltas measure from here. */
+    edge0Ms: number;
+    minDelta: number;
+    maxDelta: number;
+  } | null;
+  /** The row container, to resolve the track under the pointer (content-relative). */
+  rowsEl: HTMLElement | null;
+  /**
+   * Move drags are driven by window-level listeners: switching tracks reparents
+   * (and remounts) the clip's component mid-gesture, which would kill
+   * element-level events. Resolved-once anchors keep the math alive after the
+   * element detaches.
+   */
+  winDriven: boolean;
+  contentEl: HTMLElement | null;
+  scrollerEl: HTMLElement | null;
 }
 
 interface Props {
@@ -122,9 +149,13 @@ export const ClipView = memo(function ClipView({
   /** Mode of the in-flight drag - drives the floating time badge. */
   const [liveDragMode, setLiveDragMode] = useState<DragState['mode'] | null>(null);
 
-  // Unmount mid-drag: drop every session listener and timer.
+  // Unmount cleanup - EXCEPT for a window-driven move session: switching
+  // tracks remounts this component mid-gesture, and the session (window
+  // listeners, rAF loop, drag ref - all held by closures) must keep driving
+  // the drag until the pointer is released.
   useEffect(
     () => () => {
+      if (drag.current?.winDriven) return;
       sessionCleanup.current?.();
       if (autoScrollRaf.current != null) cancelAnimationFrame(autoScrollRaf.current);
       if (longPress.current) clearTimeout(longPress.current.timer);
@@ -190,11 +221,15 @@ export const ClipView = memo(function ClipView({
     // N toggles snapping globally; holding Shift inverts it for the current drag.
     const snapActive = shiftKey ? !state.snapEnabled : state.snapEnabled;
     const snapThresholdMs = snapActive ? SNAP_THRESHOLD_PX / pxMs : 0;
+    // Coords via the content box resolved at press: d.el may be detached after
+    // a cross-track remount, but the content element lives for the whole drag.
+    const toMs = (x: number) =>
+      d.contentEl ? msFromContentX(d.contentEl, x) : msFromClientX(d.el, x);
 
     if (d.mode === 'move') {
       // Pointer-anchored: the grabbed spot stays glued under the pointer even
       // while autoscroll moves the content.
-      const raw = msFromClientX(d.el, clientX) - (d.downMs - d.origStartMs);
+      const raw = toMs(clientX) - (d.downMs - d.origStartMs);
       let proposed = hapticOnSnap(raw, snapMove(raw, d.durMs, d.points, snapThresholdMs), d);
       proposed = Math.max(0, proposed);
       // Guide line at whichever point captured the clip's start or end.
@@ -215,10 +250,14 @@ export const ClipView = memo(function ClipView({
           [...d.groupStarts].map(([clipId, orig]) => ({ clipId, timelineStartMs: orig + delta })),
         );
       } else {
+        // Target track = the row under the pointer, resolved content-relative
+        // so vertical autoscroll (rect moves, pointer doesn't) stays correct.
         let targetTrackId: string | undefined;
         const tracks = state.project.tracks;
-        const deltaRows = Math.round((clientY - d.startY) / TRACK_HEIGHT_PX);
-        const targetIdx = clamp(d.origTrackIndex + deltaRows, 0, tracks.length - 1);
+        const rowsRect = d.rowsEl?.getBoundingClientRect();
+        const targetIdx = rowsRect
+          ? clamp(Math.floor((clientY - rowsRect.top) / TRACK_HEIGHT_PX), 0, tracks.length - 1)
+          : d.origTrackIndex;
         if (tracks[targetIdx]?.kind === trackKind) targetTrackId = tracks[targetIdx].id;
 
         state.moveClip(d.targetClipId, proposed, targetTrackId);
@@ -229,7 +268,7 @@ export const ClipView = memo(function ClipView({
       state.slipClip(d.targetClipId, d.origSourceInMs - (dx / pxMs) * clip.speed);
     } else if (d.mode === 'fade-in' || d.mode === 'fade-out') {
       // Fade handles: drag inward from a clip edge to fade from/to black (and silence).
-      const tMs = msFromClientX(d.el, clientX);
+      const tMs = toMs(clientX);
       if (d.mode === 'fade-in') {
         const v = Math.round(clamp(tMs - d.origStartMs, 0, d.durMs) / 10) * 10;
         state.updateClip(clip.id, { fadeInMs: v });
@@ -238,7 +277,21 @@ export const ClipView = memo(function ClipView({
         state.updateClip(clip.id, { fadeOutMs: v });
       }
     } else {
-      const raw = msFromClientX(d.el, clientX);
+      const raw = toMs(clientX);
+      if (d.roll) {
+        // Roll edit: the cut moves by the pointer's DELTA (anchored at the
+        // grab point, like every NLE - not teleported to the pointer), the cut
+        // itself snapping to the timeline's snap points. Both edges move by
+        // the same delta so overall length (and any crossfade overlap) is
+        // preserved; trimClip carries the linked A/V partners along.
+        const rawCut = d.roll.edge0Ms + (raw - d.downMs);
+        const cut = hapticOnSnap(rawCut, snapTime(rawCut, d.points, snapThresholdMs), d);
+        state.setSnapGuide(cut !== rawCut ? cut : null);
+        const delta = clamp(cut - d.roll.edge0Ms, d.roll.minDelta, d.roll.maxDelta);
+        state.trimClip(d.roll.leftId, 'right', d.roll.origLeftEndMs + delta);
+        state.trimClip(d.roll.rightId, 'left', d.roll.origRightStartMs + delta);
+        return;
+      }
       const tMs = hapticOnSnap(raw, snapTime(raw, d.points, snapThresholdMs), d);
       state.setSnapGuide(tMs !== raw ? tMs : null);
       if (!d.ripple) {
@@ -298,7 +351,7 @@ export const ClipView = memo(function ClipView({
         return;
       }
       const lp = lastPointer.current;
-      const scroller = d.el.closest<HTMLElement>('.timeline-scroller');
+      const scroller = d.scrollerEl;
       if (lp && scroller && d.mode !== 'slip' && d.mode !== 'fade-in' && d.mode !== 'fade-out') {
         const rect = scroller.getBoundingClientRect();
         // The desktop gutter (sticky track headers) covers the scroller's left
@@ -311,10 +364,26 @@ export const ClipView = memo(function ClipView({
             : lp.x > rightEdge
               ? Math.min(24, (lp.x - rightEdge) / 3)
               : 0;
-        if (speed !== 0) {
-          const before = scroller.scrollLeft;
-          scroller.scrollLeft = before + speed;
-          if (scroller.scrollLeft !== before) applyDrag(lp.x, lp.y, lp.shift);
+        // Vertical: move mode only (track switching). The sticky marker bar and
+        // ruler cover the scroller's top - the zone starts below them.
+        const topEdge = rect.top + MARKER_BAR_HEIGHT_PX + RULER_HEIGHT_PX + 24;
+        const bottomEdge = rect.bottom - 28;
+        const vSpeed =
+          d.mode !== 'move'
+            ? 0
+            : lp.y < topEdge
+              ? Math.max(-16, (lp.y - topEdge) / 3)
+              : lp.y > bottomEdge
+                ? Math.min(16, (lp.y - bottomEdge) / 3)
+                : 0;
+        if (speed !== 0 || vSpeed !== 0) {
+          const beforeX = scroller.scrollLeft;
+          const beforeY = scroller.scrollTop;
+          if (speed !== 0) scroller.scrollLeft = beforeX + speed;
+          if (vSpeed !== 0) scroller.scrollTop = beforeY + vSpeed;
+          if (scroller.scrollLeft !== beforeX || scroller.scrollTop !== beforeY) {
+            applyDrag(lp.x, lp.y, lp.shift);
+          }
         }
       }
       autoScrollRaf.current = requestAnimationFrame(step);
@@ -327,6 +396,77 @@ export const ClipView = memo(function ClipView({
       clearTimeout(longPress.current.timer);
       longPress.current = null;
     }
+  };
+
+  /** One drag step from any source (element event, window event, autoscroll frame). */
+  const handleMoveEvent = (clientX: number, clientY: number, shiftKey: boolean) => {
+    const d = drag.current;
+    if (!d) return;
+    lastPointer.current = { x: clientX, y: clientY, shift: shiftKey };
+    if (!d.moved && Math.abs(clientX - d.startX) < 4 && Math.abs(clientY - d.startY) < 4) {
+      return;
+    }
+    if (!d.moved) {
+      if (d.copyOnDrag) {
+        // First movement of a Ctrl+drag: clone the group in place and switch
+        // the drag over to the clones - the originals stay where they are.
+        const state = useStore.getState();
+        const idMap = state.cloneClipsForDrag([...d.groupStarts.keys()]);
+        d.targetClipId = idMap[clip.id] ?? clip.id;
+        d.groupStarts = new Map([...d.groupStarts].map(([id, ms]) => [idMap[id] ?? id, ms]));
+        // Re-collect snap points excluding the clones: the originals' edges are
+        // now valid snap targets (a copy often lands right against its source).
+        d.points = collectSnapPoints(
+          state.project,
+          Object.values(idMap),
+          state.currentTimeMs,
+          state.loopRegion,
+        );
+      }
+      setLiveDragMode(d.mode);
+      startAutoScroll();
+    }
+    d.moved = true;
+    applyDrag(clientX, clientY, shiftKey);
+  };
+
+  /** End of drag from any source: commit the gesture and tear the session down. */
+  const finishDrag = () => {
+    const d = drag.current;
+    if (!d) return;
+    const state = useStore.getState();
+    state.endGesture();
+    if (!coarse && !d.moved) {
+      // Ctrl+click that never dragged: toggle multi-selection membership.
+      if (d.copyOnDrag) state.toggleSelectClip(clip.id);
+      // A plain click on a clip that didn't turn into a drag moves the playhead there.
+      else if (d.mode === 'move') state.seek(Math.max(0, d.downMs));
+    }
+    endDragSession();
+  };
+
+  /**
+   * Window-level drivers for a move drag: switching tracks reparents (and
+   * remounts) this component, killing element-level events mid-gesture - the
+   * window keeps delivering them for the whole session.
+   */
+  const attachWindowDrag = (pointerId: number) => {
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId === pointerId) handleMoveEvent(ev.clientX, ev.clientY, ev.shiftKey);
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId === pointerId) finishDrag();
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    const prev = sessionCleanup.current;
+    sessionCleanup.current = () => {
+      prev?.();
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
   };
 
   /** Long-press pick-up (touch): select the clip and start a move drag in place. */
@@ -373,12 +513,18 @@ export const ClipView = memo(function ClipView({
       origSourceInMs: clip.sourceInMs,
       origSourceOutMs: clip.sourceOutMs,
       ripple: null,
+      roll: null,
+      rowsEl: el.closest<HTMLElement>('[data-rowbg]')?.parentElement ?? null,
+      winDriven: true,
+      contentEl,
+      scrollerEl: el.closest<HTMLElement>('.timeline-scroller'),
     };
+    attachWindowDrag(pointerId);
     setLiveDragMode('move');
     startAutoScroll();
   };
 
-  /** Floating badge: position (move), duration (trim) or source offset (slip) + delta. */
+  /** Floating badge: position (move), cut point (roll), duration (trim) or source offset (slip) + delta. */
   const badgeText = () => {
     const d = drag.current;
     if (!d) return '';
@@ -386,6 +532,10 @@ export const ClipView = memo(function ClipView({
     if (d.mode === 'move')
       return `${formatTime(clip.timelineStartMs)} (${signed(clip.timelineStartMs - d.origStartMs)})`;
     if (d.mode === 'slip') return signed(clip.sourceInMs - d.origSourceInMs);
+    if (d.roll) {
+      const edge = d.mode === 'trim-right' ? clipEndMs(clip) : clip.timelineStartMs;
+      return `${formatTime(edge)} (${signed(edge - d.roll.edge0Ms)})`;
+    }
     return `${formatTime(durMs)} (${signed(durMs - d.durMs)})`;
   };
 
@@ -443,19 +593,65 @@ export const ClipView = memo(function ClipView({
         if (groupIds.includes(c.id)) groupStarts.set(c.id, c.timelineStartMs);
       }
     }
+    const isTrim = mode === 'trim-left' || mode === 'trim-right';
     // Ctrl on a trim handle: ripple trim - downstream clips on this track follow
     // the edited edge, keeping their distance to it (their partners tag along).
     const ripple =
-      !coarse && (e.ctrlKey || e.metaKey) && (mode === 'trim-left' || mode === 'trim-right')
+      !coarse && (e.ctrlKey || e.metaKey) && isTrim
         ? (state.project.tracks
             .find((tr) => tr.id === clip.trackId)
             ?.clips.filter((c) => c.id !== clip.id && c.timelineStartMs > clip.timelineStartMs)
             .map((c) => ({ id: c.id, startMs: c.timelineStartMs })) ?? [])
         : null;
+    // Alt on a trim handle: roll edit - the cut point between this clip and its
+    // neighbor moves, one side lengthens exactly as the other shortens. Only a
+    // true edit point rolls (adjacent or crossfading neighbor); Ctrl wins.
+    let roll: DragState['roll'] = null;
+    if (!coarse && e.altKey && !ripple && isTrim) {
+      const siblings =
+        state.project.tracks.find((tr) => tr.id === clip.trackId)?.clips ?? [];
+      const neighbor =
+        mode === 'trim-right'
+          ? siblings
+              .filter((c) => c.id !== clip.id && c.timelineStartMs > clip.timelineStartMs)
+              .sort((a, b) => a.timelineStartMs - b.timelineStartMs)[0]
+          : siblings
+              .filter((c) => c.id !== clip.id && c.timelineStartMs < clip.timelineStartMs)
+              .sort((a, b) => b.timelineStartMs - a.timelineStartMs)[0];
+      const left = mode === 'trim-right' ? clip : neighbor;
+      const right = mode === 'trim-right' ? neighbor : clip;
+      if (left && right && right.timelineStartMs <= clipEndMs(left) + 1) {
+        const leftAsset = state.assets[left.assetId];
+        // Delta bounds: the left clip's out point can move within its source
+        // headroom, the right clip's in point within its own - the cut only
+        // rolls as far as BOTH sides allow.
+        const minDelta = Math.max(
+          (left.sourceInMs + MIN_CLIP_DURATION_MS * left.speed - left.sourceOutMs) / left.speed,
+          -right.sourceInMs / right.speed,
+        );
+        const maxDelta = Math.min(
+          ((leftAsset?.durationMs ?? Infinity) - left.sourceOutMs) / left.speed,
+          (right.sourceOutMs - right.sourceInMs - MIN_CLIP_DURATION_MS * right.speed) /
+            right.speed,
+        );
+        roll = {
+          leftId: left.id,
+          rightId: right.id,
+          origLeftEndMs: clipEndMs(left),
+          origRightStartMs: right.timelineStartMs,
+          edge0Ms: mode === 'trim-right' ? clipEndMs(clip) : clip.timelineStartMs,
+          minDelta,
+          maxDelta,
+        };
+      }
+    }
     // Time under the pointer at press: a plain click (no drag) on a clip moves
     // the playhead there, like a classic NLE.
     const contentEl = timelineContentEl(e.currentTarget as HTMLElement);
     const downMs = contentEl ? msFromContentX(contentEl, e.clientX) : clip.timelineStartMs;
+    // Snap points: exclude the dragged group - and for a roll also the
+    // neighbor, whose edge sits ON the cut and would pin the roll in place.
+    const excluded = roll ? [...groupIds, roll.leftId, roll.rightId] : groupIds;
     drag.current = {
       mode,
       el,
@@ -464,7 +660,7 @@ export const ClipView = memo(function ClipView({
       origStartMs: clip.timelineStartMs,
       durMs,
       origTrackIndex: state.project.tracks.findIndex((tr) => tr.id === clip.trackId),
-      points: collectSnapPoints(state.project, groupIds, state.currentTimeMs, state.loopRegion),
+      points: collectSnapPoints(state.project, excluded, state.currentTimeMs, state.loopRegion),
       moved: false,
       lastSnap: null,
       groupStarts,
@@ -474,7 +670,13 @@ export const ClipView = memo(function ClipView({
       origSourceInMs: clip.sourceInMs,
       origSourceOutMs: clip.sourceOutMs,
       ripple,
+      roll,
+      rowsEl: el.closest<HTMLElement>('[data-rowbg]')?.parentElement ?? null,
+      winDriven: mode === 'move',
+      contentEl,
+      scrollerEl: el.closest<HTMLElement>('.timeline-scroller'),
     };
+    if (mode === 'move') attachWindowDrag(e.pointerId);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -485,49 +687,15 @@ export const ClipView = memo(function ClipView({
       }
       return;
     }
-    const d = drag.current;
-    if (!d) return;
-    lastPointer.current = { x: e.clientX, y: e.clientY, shift: e.shiftKey };
-    if (!d.moved && Math.abs(e.clientX - d.startX) < 4 && Math.abs(e.clientY - d.startY) < 4) {
-      return;
-    }
-    if (!d.moved) {
-      if (d.copyOnDrag) {
-        // First movement of a Ctrl+drag: clone the group in place and switch
-        // the drag over to the clones - the originals stay where they are.
-        const state = useStore.getState();
-        const idMap = state.cloneClipsForDrag([...d.groupStarts.keys()]);
-        d.targetClipId = idMap[clip.id] ?? clip.id;
-        d.groupStarts = new Map([...d.groupStarts].map(([id, ms]) => [idMap[id] ?? id, ms]));
-        // Re-collect snap points excluding the clones: the originals' edges are
-        // now valid snap targets (a copy often lands right against its source).
-        d.points = collectSnapPoints(
-          state.project,
-          Object.values(idMap),
-          state.currentTimeMs,
-          state.loopRegion,
-        );
-      }
-      setLiveDragMode(d.mode);
-      startAutoScroll();
-    }
-    d.moved = true;
-    applyDrag(e.clientX, e.clientY, e.shiftKey);
+    // A window-driven session gets the same event via the window listener.
+    if (drag.current?.winDriven) return;
+    handleMoveEvent(e.clientX, e.clientY, e.shiftKey);
   };
 
   const onPointerUp = () => {
     clearLongPress();
-    const d = drag.current;
-    if (!d) return;
-    const state = useStore.getState();
-    state.endGesture();
-    if (!coarse && !d.moved) {
-      // Ctrl+click that never dragged: toggle multi-selection membership.
-      if (d.copyOnDrag) state.toggleSelectClip(clip.id);
-      // A plain click on a clip that didn't turn into a drag moves the playhead there.
-      else if (d.mode === 'move') state.seek(Math.max(0, d.downMs));
-    }
-    endDragSession();
+    if (drag.current?.winDriven) return;
+    finishDrag();
   };
 
   const isVideo = trackKind === 'video';
