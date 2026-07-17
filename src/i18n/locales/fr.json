@@ -160,7 +160,7 @@
   "export.preset.portrait45.description": "1080 × 1350 à {{fps}} ips · H.264 ~9 Mbps · AAC 192 kbps",
   "export.preset.mp3.label": "MP3 (audio uniquement)",
   "export.preset.mp3.description": "Mixage complet · 320 kbps",
-  "export.preset.video.description": "{{width}} × {{height}} à {{fps}} ips · H.264 ~ {{bitrate}} Mbps · AAC 192 kbps",
+  "export.preset.video.description": "{{width}} × {{height}} à {{fps}} ips · H.264 ~ {{bitrate}} Mbps · AAC 384 kbps",
   "export.preset.audio.description": "Mixage complet · {{bitrate}} kbps",
   "export.quality.mp3_128": "128 kbps",
   "export.quality.mp3_192": "192 kbps",

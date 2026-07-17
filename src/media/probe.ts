@@ -35,6 +35,23 @@ async function probeAudioTracks(input: Input): Promise<AudioTrackInfo[]> {
 }
 
 /**
+ * Estimate a video track's average frame rate. `computePacketStats` scans only a
+ * bounded prefix of packets for a fast, accurate estimate without reading the
+ * whole file; any failure degrades to "unknown" (undefined) rather than blocking
+ * the import.
+ */
+async function probeFrameRate(
+  videoTrack: NonNullable<Awaited<ReturnType<Input['getPrimaryVideoTrack']>>>,
+): Promise<number | undefined> {
+  try {
+    const { averagePacketRate } = await videoTrack.computePacketStats(120);
+    return isFinite(averagePacketRate) && averagePacketRate > 0 ? averagePacketRate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Probe an imported file: metadata + a first quick thumbnail.
  * Throws an Error (displayable message) if the file cannot be read.
  * The full thumbnail strip and audio peaks are filled in later by
@@ -74,6 +91,7 @@ export async function probeFile(file: File, reuseId?: string): Promise<MediaAsse
     durationMs,
     width: videoTrack ? await videoTrack.getDisplayWidth() : undefined,
     height: videoTrack ? await videoTrack.getDisplayHeight() : undefined,
+    fps: videoTrack ? await probeFrameRate(videoTrack) : undefined,
     hasAudio: audioTracks.length > 0,
     audioTracks,
     thumbnails: [],

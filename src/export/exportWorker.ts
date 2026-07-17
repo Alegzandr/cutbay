@@ -88,6 +88,13 @@ async function exportMp4(req: ExportRequest, preset: Mp4Preset): Promise<void> {
   const videoSource = new CanvasSource(canvas, {
     codec: 'avc',
     bitrate: preset.videoBitrate,
+    // Offline export: never trade quality for latency, and never drop frames.
+    // (This is mediabunny's default, pinned here so an export stays lossless-of-
+    // intent even if the library default changes.)
+    latencyMode: 'quality',
+    // A key frame every 2 s matches YouTube's closed-GOP recommendation and keeps
+    // seeking/scrubbing responsive on the platforms without bloating the file.
+    keyFrameInterval: 2,
   });
   output.addVideoTrack(videoSource);
 

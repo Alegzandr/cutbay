@@ -4,7 +4,7 @@ import { AUDIO_SAMPLE_RATE } from '../app/config';
 import { t } from '../i18n';
 import { audioKey, getAudioBuffer } from '../media/mediaCache';
 import { scheduleProjectAudio } from '../preview/audioMix';
-import { ExportPreset, exportFileName } from './presets';
+import { ExportPreset, exportFileName, resolveMp4Preset } from './presets';
 import { ExportErrorCode, ExportRequest, WorkerReply } from './protocol';
 
 export interface ExportHandle {
@@ -68,12 +68,17 @@ export function startExport(
       }
     }
 
+    // Adapt frame rate (and, with it, bitrate) to the project's source footage
+    // right before encoding, so the worker receives the exact settings to use.
+    const resolvedPreset =
+      preset.kind === 'mp4' ? resolveMp4Preset(preset, project, assets) : preset;
+
     worker = new Worker(new URL('./exportWorker.ts', import.meta.url), { type: 'module' });
     const request: ExportRequest = {
       type: 'export',
       project,
       files,
-      preset,
+      preset: resolvedPreset,
       startMs,
       durationMs,
       audio,
