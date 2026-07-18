@@ -177,7 +177,12 @@ export function Timeline() {
         }
       }
     }
-    s.setSelectedClips([...ids]);
+    // A pointermove that didn't change the boxed set must not commit a fresh
+    // selection array: that would re-render every touched clip on every move.
+    const cur = s.selectedClipIds;
+    if (cur.length !== ids.size || !cur.every((id) => ids.has(id))) {
+      s.setSelectedClips([...ids]);
+    }
   };
 
   const onBgPointerDown = (e: React.PointerEvent) => {

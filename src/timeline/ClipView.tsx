@@ -80,7 +80,6 @@ const signedMs = (v: number) => `${v < 0 ? '−' : '+'}${formatTime(Math.abs(v))
 interface Props {
   clip: Clip;
   trackKind: 'video' | 'audio';
-  selected: boolean;
   pxPerMs: number;
   /** Overlap with the neighboring clips (crossfade windows), for the visuals. */
   xfadeInMs?: number;
@@ -133,12 +132,15 @@ const Filmstrip = memo(function Filmstrip({
 export const ClipView = memo(function ClipView({
   clip,
   trackKind,
-  selected,
   pxPerMs,
   xfadeInMs = 0,
   xfadeOutMs = 0,
 }: Props) {
   const { t } = useTranslation();
+  // Subscribe to just this clip's selected flag, so a selection change (or a
+  // marquee drag) only re-renders the clips whose membership actually flipped -
+  // not every clip on every track through the parent row.
+  const selected = useStore((s) => s.selectedClipIds.includes(clip.id));
   const asset = useStore((s) => s.assets[clip.assetId]);
   const padLeft = useStore((s) => s.timelinePadLeft);
   const coarse = useIsCoarsePointer();
