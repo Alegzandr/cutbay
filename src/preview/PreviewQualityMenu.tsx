@@ -49,14 +49,16 @@ export function PreviewQualityMenu() {
       {open && (
         <div
           role="menu"
-          className="touch-hit absolute bottom-full right-0 mb-1.5 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900/95 py-1 shadow-xl shadow-black/50 backdrop-blur"
+          // No touch-hit here: on the container its ::after overlay would cover
+          // the items and swallow their taps. Coarse pointers get taller rows.
+          className="absolute bottom-full right-0 mb-1.5 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900/95 py-1 shadow-xl shadow-black/50 backdrop-blur"
         >
           {OPTIONS.map((opt) => (
             <button
               key={opt}
               role="menuitemradio"
               aria-checked={mode === opt}
-              className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs ${
+              className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs pointer-coarse:py-2.5 ${
                 mode === opt ? 'text-sky-300' : 'text-zinc-300 hover:bg-zinc-800'
               }`}
               onClick={() => {
@@ -76,7 +78,7 @@ export function PreviewQualityMenu() {
         title={`${t('preview.quality.title')} — ${t('preview.quality.hint')}`}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`flex items-center gap-1.5 rounded-md border border-zinc-700/70 bg-zinc-900/70 px-2 py-1 text-[11px] font-medium tabular-nums backdrop-blur transition-colors hover:bg-zinc-800/80 ${
+        className={`touch-hit flex items-center gap-1.5 rounded-md border border-zinc-700/70 bg-zinc-900/70 px-2 py-1 text-[11px] font-medium tabular-nums backdrop-blur transition-colors hover:bg-zinc-800/80 ${
           open ? 'text-sky-300' : 'text-zinc-300'
         }`}
         onClick={() => setOpen((v) => !v)}
