@@ -19,16 +19,23 @@ const ASPECTS = [
 /**
  * The desktop toolbar as ids into the shared command map, `'---'` being a
  * separator - the same convention as MENUS in MenuBar. Grouped for an editor's
- * reflexes: cut operations, insertions, then timeline view controls.
- * `'clip.link'` is a contextual slot that renders as unlink when the selection
- * is already a linked A/V pair.
+ * reflexes: clip-structure edits, then clip treatments, insertions, and finally
+ * timeline view controls. `'clip.link'` is a contextual slot that renders as
+ * unlink when the selection is already a linked A/V pair.
+ *
+ * Speed, crop and transform are intentionally absent: on desktop the inspector
+ * is a docked column that appears the moment a clip is selected, so those
+ * controls are always one click away and need no toolbar button.
  */
 const DESKTOP_TOOLS = [
   'clip.split',
+  'clip.duplicate',
   'clip.rippleDelete',
   'clip.delete',
   'clip.link',
+  '---',
   'clip.punchIn',
+  'clip.stream',
   '---',
   'insert.text',
   'insert.marker',
