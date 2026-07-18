@@ -54,7 +54,9 @@ textarea {
 /* Extended touch target: on coarse pointers, an invisible clickable zone
    surrounds small buttons to approach the 44px WCAG target size without
    growing the visuals. The element must be position:relative (the ::after is
-   clickable because it belongs to the button's box). */
+   clickable because it belongs to the button's box). Apply it to the
+   interactive element itself only — on a container the ::after paints above
+   the non-positioned children and swallows their taps. */
 @media (pointer: coarse) {
   .touch-hit {
     position: relative;
