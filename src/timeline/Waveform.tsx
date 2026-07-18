@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from 'react';
 import { Clip, MediaAsset } from '../types';
-import { audioTrackForClip, clipDurationMs } from '../model';
+import { audioTrackForClip } from '../model';
 import { useTimelineViewport } from './viewport';
 
 interface Props {
@@ -21,6 +21,11 @@ export const Waveform = memo(function Waveform({ asset, clip, widthPx, clipLeftP
   // The clip's own source audio track (a multi-track video's clips each draw a
   // different track's waveform).
   const peaks = audioTrackForClip(asset, clip)?.peaks;
+  // Destructure the fields the draw depends on, so the effect depends on those
+  // primitives (a repaint only when the shape/gain actually changes) rather than
+  // the whole clip object - which would repaint on any unrelated edit.
+  const { sourceInMs, sourceOutMs, volume, fadeInMs, fadeOutMs, speed } = clip;
+  const { durationMs } = asset;
 
   // Only the visible slice of the clip is drawn: the canvas covers [localStart,
   // localEnd] (clip-local px) instead of the whole clip, so the per-pixel scan
@@ -42,38 +47,38 @@ export const Waveform = memo(function Waveform({ asset, clip, widthPx, clipLeftP
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = color;
-    const spanMs = clip.sourceOutMs - clip.sourceInMs;
-    const durMs = clipDurationMs(clip);
+    const spanMs = sourceOutMs - sourceInMs;
+    const durMs = spanMs / speed;
     for (let x = 0; x < w; x++) {
       // Fraction along the WHOLE clip (not just the drawn slice) so the sampled
       // source frame and the fade envelope stay correct when only a slice shows.
       // Everything here is independent of timelineStartMs, so moving a clip
       // along the timeline never triggers a repaint.
       const t = widthPx > 0 ? (localStart + ((x + 0.5) / w) * sliceW) / widthPx : 0;
-      const srcMs = clip.sourceInMs + t * spanMs;
-      const idx = Math.min(peaks.length - 1, Math.max(0, Math.floor((srcMs / asset.durationMs) * peaks.length)));
+      const srcMs = sourceInMs + t * spanMs;
+      const idx = Math.min(peaks.length - 1, Math.max(0, Math.floor((srcMs / durationMs) * peaks.length)));
       const localMs = t * durMs;
       let fade = 1;
-      if (clip.fadeInMs > 0) fade = Math.min(fade, localMs / clip.fadeInMs);
-      if (clip.fadeOutMs > 0) fade = Math.min(fade, (durMs - localMs) / clip.fadeOutMs);
-      const gain = clip.volume * Math.max(0, Math.min(1, fade));
+      if (fadeInMs > 0) fade = Math.min(fade, localMs / fadeInMs);
+      if (fadeOutMs > 0) fade = Math.min(fade, (durMs - localMs) / fadeOutMs);
+      const gain = volume * Math.max(0, Math.min(1, fade));
       const bar = Math.max(2, peaks[idx]! * gain * h);
       ctx.fillRect(x, (h - bar) / 2, 1, bar);
     }
   }, [
     peaks,
-    clip.sourceInMs,
-    clip.sourceOutMs,
-    clip.volume,
-    clip.fadeInMs,
-    clip.fadeOutMs,
-    clip.speed,
+    sourceInMs,
+    sourceOutMs,
+    volume,
+    fadeInMs,
+    fadeOutMs,
+    speed,
     widthPx,
     localStart,
     sliceW,
     visible,
     color,
-    asset.durationMs,
+    durationMs,
   ]);
 
   if (!peaks?.length || !visible) return null;

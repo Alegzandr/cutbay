@@ -259,7 +259,7 @@ export const ClipView = memo(function ClipView({
     const findLive = (id: string) =>
       useStore
         .getState()
-        .project.tracks.flatMap((t) => t.clips)
+        .project.tracks.flatMap((tr) => tr.clips)
         .find((c) => c.id === id);
 
     if (d.mode === 'move') {
@@ -677,27 +677,28 @@ export const ClipView = memo(function ClipView({
           : siblings
               .filter((c) => c.id !== clip.id && c.timelineStartMs < clip.timelineStartMs)
               .sort((a, b) => b.timelineStartMs - a.timelineStartMs)[0];
-      const left = mode === 'trim-right' ? clip : neighbor;
-      const right = mode === 'trim-right' ? neighbor : clip;
-      if (left && right && right.timelineStartMs <= clipEndMs(left) + 1) {
-        const leftAsset = state.assets[left.assetId];
+      const leftClip = mode === 'trim-right' ? clip : neighbor;
+      const rightClip = mode === 'trim-right' ? neighbor : clip;
+      if (leftClip && rightClip && rightClip.timelineStartMs <= clipEndMs(leftClip) + 1) {
+        const leftAsset = state.assets[leftClip.assetId];
         // Delta bounds: the left clip's out point can move within its source
         // headroom, the right clip's in point within its own - the cut only
         // rolls as far as BOTH sides allow.
         const minDelta = Math.max(
-          (left.sourceInMs + MIN_CLIP_DURATION_MS * left.speed - left.sourceOutMs) / left.speed,
-          -right.sourceInMs / right.speed,
+          (leftClip.sourceInMs + MIN_CLIP_DURATION_MS * leftClip.speed - leftClip.sourceOutMs) /
+            leftClip.speed,
+          -rightClip.sourceInMs / rightClip.speed,
         );
         const maxDelta = Math.min(
-          ((leftAsset?.durationMs ?? Infinity) - left.sourceOutMs) / left.speed,
-          (right.sourceOutMs - right.sourceInMs - MIN_CLIP_DURATION_MS * right.speed) /
-            right.speed,
+          ((leftAsset?.durationMs ?? Infinity) - leftClip.sourceOutMs) / leftClip.speed,
+          (rightClip.sourceOutMs - rightClip.sourceInMs - MIN_CLIP_DURATION_MS * rightClip.speed) /
+            rightClip.speed,
         );
         roll = {
-          leftId: left.id,
-          rightId: right.id,
-          origLeftEndMs: clipEndMs(left),
-          origRightStartMs: right.timelineStartMs,
+          leftId: leftClip.id,
+          rightId: rightClip.id,
+          origLeftEndMs: clipEndMs(leftClip),
+          origRightStartMs: rightClip.timelineStartMs,
           edge0Ms: mode === 'trim-right' ? clipEndMs(clip) : clip.timelineStartMs,
           minDelta,
           maxDelta,

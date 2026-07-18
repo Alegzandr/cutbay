@@ -286,7 +286,7 @@ function PreviewOverlays({
     // Magnetism: snap to the natural "fit-to-frame" scale (1.0) unless Shift is held.
     if (!e.shiftKey && Math.abs(scale - 1) < 0.03) scale = 1;
     const state = useStore.getState();
-    const clip = state.project.tracks.flatMap((t) => t.clips).find((c) => c.id === r.clipId);
+    const clip = state.project.tracks.flatMap((tr) => tr.clips).find((c) => c.id === r.clipId);
     if (!clip) return;
     const tf = clip.transform ?? DEFAULT_TRANSFORM;
     state.updateClip(r.clipId, { transform: { ...tf, scale } });
@@ -417,7 +417,7 @@ export function PreviewCanvas() {
     if (!d.moved && Math.abs(nx - d.startNx) < 0.004 && Math.abs(ny - d.startNy) < 0.004) return;
     d.moved = true;
     const state = useStore.getState();
-    const clip = state.project.tracks.flatMap((t) => t.clips).find((c) => c.id === d.clipId);
+    const clip = state.project.tracks.flatMap((tr) => tr.clips).find((c) => c.id === d.clipId);
     if (!clip) return;
     const tf = clip.transform ?? DEFAULT_TRANSFORM;
     let x = d.origX + (nx - d.startNx);
