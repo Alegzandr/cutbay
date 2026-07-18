@@ -16,6 +16,7 @@ import { useTimelineWheel } from './hooks/useTimelineWheel';
 import { usePinchZoom } from './hooks/usePinchZoom';
 import { useMobileScrubSync } from './hooks/useMobileScrubSync';
 import { useAssetDrop } from './hooks/useAssetDrop';
+import { publishViewport } from './viewport';
 
 /** Vertical guide at the point a drag is currently snapped to (all NLEs flash one). */
 function SnapGuide() {
@@ -104,6 +105,39 @@ export function Timeline() {
   useEffect(() => {
     useStore.getState().setTimelinePadLeft(padLeft);
   }, [padLeft]);
+
+  // Publish the visible content range for virtualization (ruler ticks, clip
+  // filmstrips, waveforms). Scrolling is rAF-throttled; a ResizeObserver covers
+  // panel resizes. Zoom changes content coords without always firing a scroll,
+  // so a render-driven publish below refreshes it after every re-render too.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    let raf = 0;
+    const publish = () => {
+      raf = 0;
+      publishViewport({ left: scroller.scrollLeft, right: scroller.scrollLeft + scroller.clientWidth });
+    };
+    const onScroll = () => {
+      if (raf === 0) raf = requestAnimationFrame(publish);
+    };
+    publish();
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    const ro = new ResizeObserver(publish);
+    ro.observe(scroller);
+    return () => {
+      if (raf !== 0) cancelAnimationFrame(raf);
+      scroller.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+    };
+  }, [empty]);
+
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (scroller) {
+      publishViewport({ left: scroller.scrollLeft, right: scroller.scrollLeft + scroller.clientWidth });
+    }
+  });
 
   useTimelineWheel(scrollerRef, coarse, empty);
   usePinchZoom(scrollerRef, coarse, pinching, empty);

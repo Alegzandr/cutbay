@@ -20,6 +20,7 @@ import { clamp, formatTime } from '../lib/time';
 import { useIsCoarsePointer } from '../lib/device';
 import { hapticOnSnap, snapTick } from '../lib/haptics';
 import { Waveform } from './Waveform';
+import { useTimelineViewport } from './viewport';
 
 interface DragState {
   mode: 'move' | 'trim-left' | 'trim-right' | 'fade-in' | 'fade-out' | 'slip';
@@ -94,20 +95,40 @@ const Filmstrip = memo(function Filmstrip({
   asset,
   clip,
   widthPx,
+  clipLeftPx,
 }: {
   asset: MediaAsset;
   clip: Clip;
   widthPx: number;
+  /** Content-x of the clip's left edge, to intersect the filmstrip with the viewport. */
+  clipLeftPx: number;
 }) {
+  const viewport = useTimelineViewport();
   const aspect = asset.width && asset.height ? asset.width / asset.height : 16 / 9;
   const tileW = Math.max(24, Math.round((TRACK_HEIGHT_PX - 8) * aspect));
-  const count = Math.min(1000, Math.max(1, Math.ceil(widthPx / tileW)));
+  const total = Math.max(1, Math.ceil(widthPx / tileW));
   const spanMs = clip.sourceOutMs - clip.sourceInMs;
   const thumbs = asset.thumbnails;
+
+  // Only the tiles inside the visible window are put in the DOM: a long clip at
+  // deep zoom is otherwise up to thousands of <img> nodes, rebuilt on every
+  // zoom. Until the viewport is known, render a bounded prefix (the virtualized
+  // pass corrects it on the same commit).
+  let startTile = 0;
+  let endTile = viewport ? total : Math.min(total, 400);
+  if (viewport) {
+    startTile = Math.max(0, Math.floor((viewport.left - clipLeftPx) / tileW));
+    endTile = Math.min(total, Math.max(0, Math.ceil((viewport.right - clipLeftPx) / tileW)));
+  }
+  if (endTile <= startTile) return <div className="h-full w-full" />;
+
+  const tiles: number[] = [];
+  for (let i = startTile; i < endTile; i++) tiles.push(i);
+
   return (
-    <div className="flex h-full w-full overflow-hidden">
-      {Array.from({ length: count }, (_, i) => {
-        const srcMs = clip.sourceInMs + ((i + 0.5) / count) * spanMs;
+    <div className="relative h-full w-full overflow-hidden">
+      {tiles.map((i) => {
+        const srcMs = clip.sourceInMs + ((i + 0.5) / total) * spanMs;
         const idx = Math.min(
           thumbs.length - 1,
           Math.max(0, Math.round((srcMs / asset.durationMs) * (thumbs.length - 1))),
@@ -116,11 +137,10 @@ const Filmstrip = memo(function Filmstrip({
           <img
             key={i}
             src={thumbs[idx]}
-            className="h-full flex-none object-cover"
-            style={{ width: tileW }}
+            className="absolute top-0 h-full object-cover"
+            style={{ left: i * tileW, width: tileW }}
             alt=""
             draggable={false}
-            loading="lazy"
             decoding="async"
           />
         );
@@ -823,11 +843,11 @@ export const ClipView = memo(function ClipView({
         </div>
       ) : isVideo && asset?.thumbnails.length ? (
         <div className="pointer-events-none h-full w-full">
-          <Filmstrip asset={asset} clip={clip} widthPx={width} />
+          <Filmstrip asset={asset} clip={clip} widthPx={width} clipLeftPx={left} />
           {/* Audio envelope under the thumbnails - cutting to sound needs to be visual. */}
           {hasPeaks && (
             <div className="absolute inset-x-0 bottom-0 h-1/3 bg-black/40">
-              <Waveform asset={asset} clip={clip} widthPx={width} color="rgba(255,255,255,0.85)" />
+              <Waveform asset={asset} clip={clip} widthPx={width} clipLeftPx={left} color="rgba(255,255,255,0.85)" />
             </div>
           )}
         </div>
@@ -835,7 +855,7 @@ export const ClipView = memo(function ClipView({
         <div className="pointer-events-none relative h-full w-full bg-gradient-to-b from-emerald-900/60 to-emerald-950">
           {hasPeaks && asset && (
             <div className="absolute inset-0">
-              <Waveform asset={asset} clip={clip} widthPx={width} color="rgba(110,231,183,0.65)" />
+              <Waveform asset={asset} clip={clip} widthPx={width} clipLeftPx={left} color="rgba(110,231,183,0.65)" />
             </div>
           )}
           <div className="absolute left-0 top-0 flex max-w-full items-center gap-1 px-1.5 py-0.5">
