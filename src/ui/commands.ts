@@ -123,7 +123,7 @@ export function useEditorCommands(): Record<string, Command> {
     { id: 'clip.punchIn', labelKey: 'menu.clip.punchIn', icon: Focus, shortcut: 'P', disabled: !selectedId, onClick: () => st().punchZoomSelected() },
     { id: 'clip.stream', labelKey: 'menu.clip.stream', icon: LayoutPanelTop, disabled: !canStream, onClick: () => selectedId && st().applyStreamLayout(selectedId) },
     { id: 'clip.adjust', labelKey: 'menu.clip.adjust', icon: SlidersHorizontal, disabled: !selectedId, onClick: () => st().setInspectorOpen(true) },
-    { id: 'clip.link', labelKey: 'menu.clip.link', icon: Link2, disabled: !canLink, onClick: () => { const pair = getLinkTargets(st()); if (pair) st().linkClips(pair); } },
+    { id: 'clip.link', labelKey: 'menu.clip.link', icon: Link2, disabled: !canLink, onClick: () => { const targets = getLinkTargets(st()); if (targets) st().linkClips(targets); } },
     { id: 'clip.unlink', labelKey: 'menu.clip.unlink', icon: Unlink, disabled: !isLinked, onClick: () => selectedId && st().unlinkClip(selectedId) },
     { id: 'clip.delete', labelKey: 'menu.clip.delete', icon: Trash2, shortcut: 'Del', danger: true, disabled: !hasSelection, onClick: () => st().deleteClips(st().selectedClipIds, false) },
     { id: 'clip.rippleDelete', labelKey: 'menu.clip.rippleDelete', icon: FoldHorizontal, shortcut: 'Shift+Del', danger: true, disabled: !hasSelection, onClick: () => st().deleteClips(st().selectedClipIds, true) },

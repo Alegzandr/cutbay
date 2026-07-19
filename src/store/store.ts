@@ -180,11 +180,11 @@ export function getSelectedClip(state: EditorState): Clip | null {
 let linkTargetsCache: {
   project: Project;
   ids: string[];
-  targets: [string, string] | null;
+  targets: string[] | null;
 } | null = null;
 
-/** Selector: the clip pair a "Link" action would join, or null (drives the command). */
-export function getLinkTargets(state: EditorState): [string, string] | null {
+/** Selector: the clips a "Link" action would join, or null (drives the command). */
+export function getLinkTargets(state: EditorState): string[] | null {
   const { project, selectedClipIds } = state;
   if (
     linkTargetsCache &&

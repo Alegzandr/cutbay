@@ -142,23 +142,28 @@ export function withLinkedIds(project: Project, clipIds: Iterable<string>): stri
 }
 
 /**
- * The best A/V-link partner for a lone clip, or null. Drives the single-select
- * "Link" path: an unlinked media clip on the OPPOSITE-kind track, from the SAME
- * asset, preferring the one that overlaps it in time (falling back to the
- * closest start). Same-asset matching makes the unlink → re-link round trip
- * pick the original partner back.
+ * The A/V-link partners for a lone clip (empty if none). Drives the
+ * single-select "Link" path: unlinked media clips on the OPPOSITE-kind tracks,
+ * from the SAME asset, preferring the one that overlaps it in time (falling
+ * back to the closest start). Same-asset matching makes the unlink → re-link
+ * round trip pick the original partners back.
+ *
+ * A video clip takes the best candidate from EACH audio track, because an
+ * import splits a multi-stream source into one audio lane per stream and all of
+ * them belong to the same group. An audio clip takes a single video partner.
  */
-export function linkCandidate(project: Project, clipId: string): string | null {
+export function linkCandidates(project: Project, clipId: string): string[] {
   const found = findClip(project, clipId);
-  if (!found) return null;
+  if (!found) return [];
   const { clip, track } = found;
-  if (clip.linkId != null || clip.kind !== 'media' || clip.assetId === '') return null;
+  if (clip.linkId != null || clip.kind !== 'media' || clip.assetId === '') return [];
   const wantKind: Track['kind'] = track.kind === 'video' ? 'audio' : 'video';
   const start = clip.timelineStartMs;
   const end = clipEndMs(clip);
-  let best: { id: string; overlap: number; gap: number } | null = null;
+  const perTrack: { id: string; overlap: number; gap: number }[] = [];
   for (const t of project.tracks) {
     if (t.kind !== wantKind) continue;
+    let best: { id: string; overlap: number; gap: number } | null = null;
     for (const c of t.clips) {
       if (c.linkId != null || c.kind !== 'media' || c.assetId !== clip.assetId) continue;
       const overlap = Math.max(0, Math.min(end, clipEndMs(c)) - Math.max(start, c.timelineStartMs));
@@ -167,32 +172,46 @@ export function linkCandidate(project: Project, clipId: string): string | null {
         best = { id: c.id, overlap, gap };
       }
     }
+    if (best) perTrack.push(best);
   }
-  return best ? best.id : null;
+  if (perTrack.length === 0) return [];
+  // Only one video side per link: keep the single best when pairing up from audio.
+  if (wantKind === 'video') {
+    let best = perTrack[0]!;
+    for (const cand of perTrack) {
+      if (cand.overlap > best.overlap || (cand.overlap === best.overlap && cand.gap < best.gap)) {
+        best = cand;
+      }
+    }
+    return [best.id];
+  }
+  return perTrack.map((c) => c.id);
 }
 
 /**
  * Which clips a "Link" action would join, or null if the selection can't be
- * linked. Two selected clips must sit on opposite-kind tracks and both be
- * unlinked; a single selected clip auto-pairs with its `linkCandidate`. Used
- * for both the command's enabled state and its handler, so they never disagree.
+ * linked. A multi-clip selection must be entirely unlinked and hold exactly one
+ * clip on a video track plus at least one on an audio track (an A/V group is
+ * one video side with one lane per audio stream); a single selected clip
+ * auto-pairs with its `linkCandidates`. Used for both the command's enabled
+ * state and its handler, so they never disagree.
  */
-export function linkableSelection(
-  project: Project,
-  selectedClipIds: string[],
-): [string, string] | null {
-  if (selectedClipIds.length === 2) {
-    const [a, b] = selectedClipIds as [string, string];
-    const fa = findClip(project, a);
-    const fb = findClip(project, b);
-    if (!fa || !fb) return null;
-    if (fa.clip.linkId != null || fb.clip.linkId != null) return null;
-    if (fa.track.kind === fb.track.kind) return null;
-    return [a, b];
+export function linkableSelection(project: Project, selectedClipIds: string[]): string[] | null {
+  if (selectedClipIds.length >= 2) {
+    let videoCount = 0;
+    let audioCount = 0;
+    for (const id of selectedClipIds) {
+      const found = findClip(project, id);
+      if (!found || found.clip.linkId != null) return null;
+      if (found.track.kind === 'video') videoCount++;
+      else audioCount++;
+    }
+    if (videoCount !== 1 || audioCount === 0) return null;
+    return [...selectedClipIds];
   }
   if (selectedClipIds.length === 1) {
-    const partner = linkCandidate(project, selectedClipIds[0]!);
-    return partner ? [selectedClipIds[0]!, partner] : null;
+    const partners = linkCandidates(project, selectedClipIds[0]!);
+    return partners.length > 0 ? [selectedClipIds[0]!, ...partners] : null;
   }
   return null;
 }

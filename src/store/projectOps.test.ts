@@ -6,7 +6,7 @@ import {
   createEmptyProject,
   linkedPartnerIds,
   withLinkedIds,
-  linkCandidate,
+  linkCandidates,
   linkableSelection,
 } from './projectOps';
 import type { MediaClip, Project, Track } from '../types';
@@ -111,7 +111,7 @@ describe('A/V link helpers', () => {
   });
 });
 
-describe('linkCandidate / linkableSelection', () => {
+describe('linkCandidates / linkableSelection', () => {
   // A video and its extracted audio (same asset 'a'), both unlinked, plus an
   // unrelated audio clip from a different source.
   const unpaired = () =>
@@ -127,9 +127,25 @@ describe('linkCandidate / linkableSelection', () => {
       },
     ]);
 
+  // Same source split across two audio lanes, as a multi-stream import does.
+  const multiLane = () =>
+    project([
+      { id: 'v1', kind: 'video', clips: [clip({ id: 'v', assetId: 'a', sourceOutMs: 4000 })] },
+      { id: 'a1', kind: 'audio', clips: [clip({ id: 'a', trackId: 'a1', assetId: 'a', sourceOutMs: 4000 })] },
+      { id: 'a2', kind: 'audio', clips: [clip({ id: 'b', trackId: 'a2', assetId: 'a', sourceOutMs: 4000 })] },
+    ]);
+
   it('pairs a clip with the same-asset clip on the opposite track', () => {
-    expect(linkCandidate(unpaired(), 'v')).toBe('a');
-    expect(linkCandidate(unpaired(), 'a')).toBe('v');
+    expect(linkCandidates(unpaired(), 'v')).toEqual(['a']);
+    expect(linkCandidates(unpaired(), 'a')).toEqual(['v']);
+  });
+
+  it('pairs a video with one candidate per audio lane', () => {
+    expect(linkCandidates(multiLane(), 'v')).toEqual(['a', 'b']);
+  });
+
+  it('pairs an audio lane with a single video side', () => {
+    expect(linkCandidates(multiLane(), 'a')).toEqual(['v']);
   });
 
   it('ignores a different-asset clip on the opposite track', () => {
@@ -137,7 +153,7 @@ describe('linkCandidate / linkableSelection', () => {
       { id: 'v1', kind: 'video', clips: [clip({ id: 'v', assetId: 'a' })] },
       { id: 'a1', kind: 'audio', clips: [clip({ id: 'other', trackId: 'a1', assetId: 'b' })] },
     ]);
-    expect(linkCandidate(p, 'v')).toBeNull();
+    expect(linkCandidates(p, 'v')).toEqual([]);
   });
 
   it('offers no candidate for an already-linked clip', () => {
@@ -145,7 +161,7 @@ describe('linkCandidate / linkableSelection', () => {
       { id: 'v1', kind: 'video', clips: [clip({ id: 'v', assetId: 'a', linkId: 'L' })] },
       { id: 'a1', kind: 'audio', clips: [clip({ id: 'a', trackId: 'a1', assetId: 'a' })] },
     ]);
-    expect(linkCandidate(p, 'v')).toBeNull();
+    expect(linkCandidates(p, 'v')).toEqual([]);
   });
 
   it('resolves a two-clip selection on opposite tracks', () => {
@@ -159,8 +175,22 @@ describe('linkCandidate / linkableSelection', () => {
     expect(linkableSelection(p, ['x', 'y'])).toBeNull();
   });
 
-  it('auto-resolves a single-clip selection to its candidate', () => {
+  it('resolves a video plus several audio lanes', () => {
+    expect(linkableSelection(multiLane(), ['v', 'a', 'b'])).toEqual(['v', 'a', 'b']);
+  });
+
+  it('rejects a selection holding more than one video side', () => {
+    const p = project([
+      { id: 'v1', kind: 'video', clips: [clip({ id: 'v', assetId: 'a' })] },
+      { id: 'v2', kind: 'video', clips: [clip({ id: 'w', trackId: 'v2', assetId: 'a' })] },
+      { id: 'a1', kind: 'audio', clips: [clip({ id: 'a', trackId: 'a1', assetId: 'a' })] },
+    ]);
+    expect(linkableSelection(p, ['v', 'w', 'a'])).toBeNull();
+  });
+
+  it('auto-resolves a single-clip selection to its candidates', () => {
     expect(linkableSelection(unpaired(), ['v'])).toEqual(['v', 'a']);
+    expect(linkableSelection(multiLane(), ['v'])).toEqual(['v', 'a', 'b']);
     expect(linkableSelection(unpaired(), ['other'])).toBeNull();
     expect(linkableSelection(unpaired(), [])).toBeNull();
   });
