@@ -6,8 +6,16 @@ import { TrackRow } from './TrackRow';
 import { Ruler } from './Ruler';
 import { Playhead } from './Playhead';
 import { MarkerBar, TimelineOverlay } from './MarkerBar';
+import { TrackHeader } from './TrackHeader';
 import { msFromClientX, msFromContentX, timelineContentEl } from './coords';
-import { TIMELINE_PAD_LEFT, TRACK_HEIGHT_PX } from '../app/config';
+import {
+  MARKER_BAR_HEIGHT_PX,
+  RULER_HEIGHT_PX,
+  TIMELINE_PAD_LEFT,
+  TRACK_HEADER_WIDTH_COARSE_PX,
+  TRACK_HEADER_WIDTH_PX,
+  TRACK_HEIGHT_PX,
+} from '../app/config';
 import { clipEndMs } from '../store/store';
 import { clamp } from '../lib/time';
 import { useImport } from '../ui/useImport';
@@ -40,7 +48,11 @@ export function Timeline() {
   const coarse = useIsCoarsePointer();
   const importFiles = useImport();
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const headersRef = useRef<HTMLDivElement>(null);
   const [halfW, setHalfW] = useState(0);
+  // Height the scroller's horizontal scrollbar steals, so the header pane stops
+  // at the same line as the last visible row instead of running under it.
+  const [hBarPx, setHBarPx] = useState(0);
   const programmaticScroll = useRef(false);
   const pinching = useRef(false);
   const lastScrollLeft = useRef(0);
@@ -86,15 +98,35 @@ export function Timeline() {
   // Mobile: half the viewport on both sides so t=0 and the end can sit under the
   // fixed center playhead. Desktop: fixed pad + room to drag clips past the end.
   const padLeft = coarse ? halfW : TIMELINE_PAD_LEFT;
+  const headerWidth = coarse ? TRACK_HEADER_WIDTH_COARSE_PX : TRACK_HEADER_WIDTH_PX;
   const contentWidth = coarse
     ? padLeft + durationMs * pxPerMs + halfW
     : TIMELINE_PAD_LEFT + (durationMs + 60_000) * pxPerMs;
 
-  // Measure the viewport half-width (mobile centered playhead).
+  // Mirror the scroller's vertical offset onto the header pane. Done on the raw
+  // scroll event rather than the rAF-throttled publish below: a frame of lag
+  // here shows up as the headers visibly sliding against their own rows.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const sync = () => {
+      const el = headersRef.current;
+      if (el) el.style.transform = `translateY(${-scroller.scrollTop}px)`;
+    };
+    sync();
+    scroller.addEventListener('scroll', sync, { passive: true });
+    return () => scroller.removeEventListener('scroll', sync);
+  }, [empty]);
+
+  // Measure the viewport half-width (mobile centered playhead) and the
+  // horizontal scrollbar the header pane has to stop short of.
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
-    const measure = () => setHalfW(scroller.clientWidth / 2);
+    const measure = () => {
+      setHalfW(scroller.clientWidth / 2);
+      setHBarPx(scroller.offsetHeight - scroller.clientHeight);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(scroller);
@@ -258,7 +290,32 @@ export function Timeline() {
   };
 
   return (
-    <div className="relative min-h-0 flex-1" onDragOver={onAssetDragOver} onDrop={onAssetDrop}>
+    <div className="relative flex min-h-0 flex-1" onDragOver={onAssetDragOver} onDrop={onAssetDrop}>
+      {/* Fixed header pane, outside the scroller: the timeline cannot reach it. */}
+      <div
+        className="flex shrink-0 flex-col border-r border-zinc-800 bg-zinc-900"
+        style={{ width: headerWidth, paddingBottom: hBarPx }}
+      >
+        {/* Corner block, matching the marker bar + ruler so row N of the pane
+            lines up with row N of the scroller. */}
+        <div
+          className="shrink-0 border-b border-zinc-800"
+          style={{ height: MARKER_BAR_HEIGHT_PX + RULER_HEIGHT_PX }}
+        />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {/* Translated to mirror the scroller's vertical offset - the pane has
+              no scroll of its own, so the two can never drift apart. */}
+          <div ref={headersRef} className="will-change-transform">
+            {project.tracks.map((track) => (
+              <TrackHeader key={track.id} track={track} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* min-w-0: without it the flex item sizes to the timeline content instead
+          of clamping it, and the scroller never gets anything to scroll. */}
+      <div className="relative min-h-0 min-w-0 flex-1">
       <div
         ref={scrollerRef}
         className="timeline-scroller h-full overflow-auto overscroll-none bg-zinc-950"
@@ -295,8 +352,8 @@ export function Timeline() {
           <TimelineOverlay pxPerMs={pxPerMs} trackCount={project.tracks.length} />
           <SnapGuide />
 
-          {/* Opaque: sticky + z-20 alone would still let the playhead bar show
-              through, the same way the track headers rely on their own bg. */}
+          {/* Opaque + sticky at the scroller's left edge, so the buttons stay
+              reachable however far the timeline is scrolled. */}
           <div className="sticky left-0 z-20 flex w-fit gap-2 bg-zinc-950 p-2">
             <button
               className="touch-hit rounded-md border border-dashed border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 active:bg-zinc-800 pointer-coarse:py-2"
@@ -331,12 +388,13 @@ export function Timeline() {
         />
       )}
 
-      {/* Mobile: fixed playhead at the center of the viewport (the timeline scrolls under it). */}
+      {/* Mobile: fixed playhead at the center of the scroller (the timeline scrolls under it). */}
       {coarse && (
         <div className="pointer-events-none absolute inset-y-0 left-1/2 z-30 w-0.5 -translate-x-1/2 bg-red-500">
           <div className="absolute -left-[5px] top-0 h-0 w-0 border-x-[6px] border-t-[7px] border-x-transparent border-t-red-500" />
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -13,7 +13,6 @@ import {
   MIN_CLIP_DURATION_MS,
   RULER_HEIGHT_PX,
   SNAP_THRESHOLD_PX,
-  TRACK_HEADER_WIDTH_PX,
   TRACK_HEIGHT_PX,
 } from '../app/config';
 import { clamp, formatTime } from '../lib/time';
@@ -477,9 +476,9 @@ export const ClipView = memo(function ClipView({
         d.mode !== 'volume'
       ) {
         const rect = scroller.getBoundingClientRect();
-        // The desktop gutter (sticky track headers) covers the scroller's left
-        // side - autoscroll must kick in before the pointer dives under it.
-        const leftEdge = rect.left + (coarse ? 0 : TRACK_HEADER_WIDTH_PX) + 40;
+        // The header pane is outside the scroller, so its left edge is already
+        // the timeline's: no gutter to compensate for.
+        const leftEdge = rect.left + 40;
         const rightEdge = rect.right - 40;
         const speed =
           lp.x < leftEdge

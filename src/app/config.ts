@@ -49,13 +49,14 @@ export const ASSET_DRAG_MIME = 'application/x-selfcut-asset';
 
 /** Timeline geometry. */
 export const TRACK_HEIGHT_PX = 64;
-/** Width of the sticky track header (desktop gutter with sliders + meter). */
+/** Width of the fixed track-header pane (desktop: sliders + meter; coarse: buttons only). */
 export const TRACK_HEADER_WIDTH_PX = 112;
+export const TRACK_HEADER_WIDTH_COARSE_PX = 44;
 /**
- * Desktop timeline pad: t=0 must sit PAST the sticky track header, otherwise
- * the playhead at 0 and the first second of every clip hide under the gutter.
+ * Desktop timeline pad. The header pane sits outside the scroller, so t=0 is
+ * flush with the scroller's left edge - like every NLE.
  */
-export const TIMELINE_PAD_LEFT = TRACK_HEADER_WIDTH_PX + 8;
+export const TIMELINE_PAD_LEFT = 0;
 /** Marker / loop-region bar, stacked above the ruler (both sticky at the top). */
 export const MARKER_BAR_HEIGHT_PX = 18;
 export const RULER_HEIGHT_PX = 24;
