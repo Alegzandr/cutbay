@@ -34,3 +34,27 @@ export function faderToGain(pos: number): number {
 
 /** Fader position of unity gain - where the "0 dB" tick is drawn. */
 export const UNITY_FADER = gainToFader(1);
+
+/**
+ * Fader position -> where the clip's volume line sits, 0 at the bottom of the
+ * clip and 1 at the top.
+ *
+ * Not the fader itself: the dB scale is lopsided (48 dB below unity, 12 above),
+ * so a raw fader would rest the line at 80% of the clip height. A line that
+ * idles just under the clip's top edge reads as an artefact, and it leaves no
+ * room to show a boost. Each half is scaled on its own instead, which pins
+ * unity dead centre - above the middle is boost, below is attenuation - and
+ * hands the +12 dB of headroom half the height, where trims are finest.
+ */
+export function faderToLinePos(fader: number): number {
+  return fader <= UNITY_FADER
+    ? (fader / UNITY_FADER) * 0.5
+    : 0.5 + ((fader - UNITY_FADER) / (1 - UNITY_FADER)) * 0.5;
+}
+
+/** Inverse of {@link faderToLinePos} - drags work in line positions. */
+export function linePosToFader(pos: number): number {
+  return pos <= 0.5
+    ? (pos / 0.5) * UNITY_FADER
+    : UNITY_FADER + ((pos - 0.5) / 0.5) * (1 - UNITY_FADER);
+}

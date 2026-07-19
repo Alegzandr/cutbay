@@ -42,7 +42,7 @@ export const Ruler = memo(function Ruler({ durationMs, pxPerMs, overscanMs }: Pr
 
   return (
     <div
-      className="sticky z-20 cursor-col-resize touch-none border-b border-zinc-800 bg-zinc-900/95"
+      className="sticky z-30 cursor-col-resize touch-none border-b border-zinc-800 bg-zinc-900/95"
       style={{ top: MARKER_BAR_HEIGHT_PX, height: RULER_HEIGHT_PX }}
       onPointerDown={(e) => {
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);

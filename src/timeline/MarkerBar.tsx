@@ -161,7 +161,7 @@ export const MarkerBar = memo(function MarkerBar({ pxPerMs }: { pxPerMs: number 
   return (
     <div
       data-marker-bar
-      className="sticky top-0 z-20 touch-none border-b border-zinc-800 bg-zinc-900"
+      className="sticky top-0 z-30 touch-none border-b border-zinc-800 bg-zinc-900"
       style={{ height: MARKER_BAR_HEIGHT_PX }}
       title={t('marker.barHint')}
       onPointerDown={onBarPointerDown}

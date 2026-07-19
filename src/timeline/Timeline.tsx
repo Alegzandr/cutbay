@@ -26,7 +26,7 @@ function SnapGuide() {
   if (snapGuideMs === null) return null;
   return (
     <div
-      className="pointer-events-none absolute inset-y-0 z-20 w-px bg-sky-300/90"
+      className="pointer-events-none absolute inset-y-0 z-10 w-px bg-sky-300/90"
       style={{ left: padLeft + snapGuideMs * (pxPerSec / 1000) }}
     />
   );
@@ -295,7 +295,7 @@ export function Timeline() {
           <TimelineOverlay pxPerMs={pxPerMs} trackCount={project.tracks.length} />
           <SnapGuide />
 
-          <div className="sticky left-0 flex w-fit gap-2 p-2">
+          <div className="sticky left-0 z-20 flex w-fit gap-2 p-2">
             <button
               className="touch-hit rounded-md border border-dashed border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 active:bg-zinc-800 pointer-coarse:py-2"
               onClick={() => addTrack('video')}

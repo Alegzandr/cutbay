@@ -13,18 +13,21 @@ interface Props {
  * reconciliation (and a layout-invalidating `left`) is pure overhead.
  */
 export function Playhead({ scrollerRef }: Props) {
-  const rootRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const handleRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const el = rootRef.current;
-    if (!el) return;
+    const bar = barRef.current;
+    const handle = handleRef.current;
+    if (!bar || !handle) return;
     let lastX = -1;
     const apply = () => {
       const s = useStore.getState();
       const x = s.timelinePadLeft + s.currentTimeMs * (s.pxPerSec / 1000);
       if (x !== lastX) {
         lastX = x;
-        el.style.transform = `translateX(${x}px)`;
+        bar.style.transform = `translateX(${x}px)`;
+        handle.style.transform = `translateX(${x}px)`;
       }
       // Keep the playhead in view while playing.
       const scroller = scrollerRef.current;
@@ -55,17 +58,25 @@ export function Playhead({ scrollerRef }: Props) {
     useStore.getState().seek(msFromClientX(e.currentTarget as HTMLElement, e.clientX));
   };
 
+  // Bar and handle are siblings rather than one transformed wrapper: a wrapper
+  // with a transform would create a stacking context, forcing both to share a
+  // single z-index. The bar has to slide *under* the sticky track headers
+  // (z-20) while the handle stays *over* the marker bar / ruler (z-30).
   return (
-    <div ref={rootRef} className="pointer-events-none absolute inset-y-0 left-0 z-30 will-change-transform">
-      <div className="absolute inset-y-0 -ml-px w-0.5 bg-red-500" />
+    <>
       <div
-        className="pointer-events-auto absolute -left-2 top-0 h-5 w-4 cursor-col-resize touch-none rounded-b-md bg-red-500"
+        ref={barRef}
+        className="pointer-events-none absolute inset-y-0 -ml-px left-0 z-10 w-0.5 bg-red-500 will-change-transform"
+      />
+      <div
+        ref={handleRef}
+        className="absolute -ml-2 left-0 top-0 z-40 h-5 w-4 cursor-col-resize touch-none rounded-b-md bg-red-500 will-change-transform"
         onPointerDown={(e) => {
           e.stopPropagation();
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         }}
         onPointerMove={onPointerMove}
       />
-    </div>
+    </>
   );
 }

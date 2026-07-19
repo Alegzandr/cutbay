@@ -18,7 +18,7 @@ import {
 } from '../app/config';
 import { clamp, formatTime } from '../lib/time';
 import { gainDb } from '../inspector/format';
-import { UNITY_FADER, faderToGain, gainToFader } from '../lib/gain';
+import { UNITY_FADER, faderToGain, faderToLinePos, gainToFader, linePosToFader } from '../lib/gain';
 import { useIsCoarsePointer } from '../lib/device';
 import { hapticOnSnap, snapTick } from '../lib/haptics';
 import { Waveform } from './Waveform';
@@ -80,10 +80,13 @@ interface DragState {
 }
 
 /**
- * Pointer travel that spans the volume line's full fader range. Deliberately
- * larger than a track row: mapping 60 dB onto the ~55 px of clip height would
- * make a single pixel worth more than a dB. The line still follows the drag,
- * just damped - and Shift quarters it again for sub-dB trims.
+ * Pointer travel that spans the volume line's full range. Deliberately larger
+ * than a track row: mapping the whole scale onto the ~55 px of clip height
+ * would make a single pixel worth more than a dB. The line still follows the
+ * drag, just damped - and Shift quarters it again for sub-dB trims.
+ *
+ * The drag moves the line's *position*, not the fader, so the line tracks the
+ * pointer at one constant speed across the two halves of the scale.
  */
 const VOLUME_DRAG_TRAVEL_PX = 220;
 
@@ -97,7 +100,8 @@ const VOLUME_DRAG_TRAVEL_PX = 220;
  * otherwise the 2 px gain line sits a pixel above the 1 px unity tick and the
  * two never quite meet at 0 dB.
  */
-const volumeLineBottom = (fader: number) => `clamp(5px, ${fader * 100}%, calc(100% - 3px))`;
+const volumeLineBottom = (fader: number) =>
+  `clamp(5px, ${faderToLinePos(fader) * 100}%, calc(100% - 3px))`;
 
 /** "+m:ss.d" / "−m:ss.d" - the badge's signed delta since the press. */
 const signedMs = (v: number) => `${v < 0 ? '−' : '+'}${formatTime(Math.abs(v))}`;
@@ -348,16 +352,17 @@ export const ClipView = memo(function ClipView({
         });
       }
     } else if (d.mode === 'volume') {
-      // Vegas volume line: the whole clip height spans the fader travel, so the
-      // drag is relative to the press - the line never jumps to the pointer.
-      // Shift = fine mode (a quarter of the travel) for sub-dB nudges.
+      // Vegas volume line: the drag is relative to the press - the line never
+      // jumps to the pointer. It moves in line positions, not fader units, so
+      // the line keeps up with the pointer at the same rate on both sides of
+      // unity. Shift = fine mode (a quarter of the travel) for sub-dB nudges.
       const scale = shiftKey ? 0.25 : 1;
       const pos = clamp(
-        d.origFader - ((clientY - d.startY) / VOLUME_DRAG_TRAVEL_PX) * scale,
+        faderToLinePos(d.origFader) - ((clientY - d.startY) / VOLUME_DRAG_TRAVEL_PX) * scale,
         0,
         1,
       );
-      const volume = faderToGain(pos);
+      const volume = faderToGain(linePosToFader(pos));
       state.updateClip(clip.id, { volume });
       state.setDragBadge({ clipId: clip.id, text: gainDb(volume) });
     } else if (d.mode === 'fade-in' || d.mode === 'fade-out') {
@@ -826,8 +831,8 @@ export const ClipView = memo(function ClipView({
   const touch = coarse && !selected ? '' : 'touch-none';
   // `isolate` below gives the clip its own stacking context. Its inner
   // z-10/z-20/z-30 (volume line, grab band, badges) have to stay inside it:
-  // the sticky track header is z-10 too, and a clip is rendered after it, so
-  // otherwise those layers win the tie on DOM order and paint over the gutter.
+  // the sticky track header is z-20 and a clip is rendered after it, so
+  // otherwise those layers would paint over the gutter.
 
   return (
     <div

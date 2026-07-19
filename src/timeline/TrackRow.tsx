@@ -41,7 +41,7 @@ export const TrackRow = memo(function TrackRow({ track, pxPerMs }: Props) {
     >
       {/* Sticky track header: buttons + (desktop) volume/opacity sliders and level meter */}
       <div
-        className={`sticky left-0 z-10 flex h-full items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-0.5 ${coarse ? 'w-11 justify-center' : 'px-1'}`}
+        className={`sticky left-0 z-20 flex h-full items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-0.5 ${coarse ? 'w-11 justify-center' : 'px-1'}`}
         style={coarse ? undefined : { width: TRACK_HEADER_WIDTH_PX }}
         onContextMenu={(e) => {
           if (coarse) return; // Desktop only.
