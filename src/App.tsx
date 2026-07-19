@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { PlugZap, UploadCloud } from 'lucide-react';
 import { useStore } from './store/store';
 import { initPersistence } from './lib/persistence';
-import { openMediaPicker } from './ui/mediaPicker';
+import { openFolderPicker, openMediaPicker } from './ui/mediaPicker';
 import { MenuBar } from './ui/MenuBar';
 import { TopBar } from './ui/TopBar';
 import { Transport } from './ui/Transport';
@@ -154,8 +154,8 @@ function DisconnectedBanner() {
   const disconnected = Object.values(assets).filter((a) => a.disconnected);
   if (disconnected.length === 0) return null;
 
-  const reconnectAll = () => {
-    openMediaPicker((files) => {
+  const reconnectFrom = (open: typeof openMediaPicker) => () => {
+    open((files) => {
       const { reconnectAsset } = useStore.getState();
       // Match each picked file back to a disconnected asset by file name.
       const byName = new Map(disconnected.map((a) => [a.file.name, a.id]));
@@ -177,9 +177,16 @@ function DisconnectedBanner() {
       </span>
       <button
         className="flex-none rounded bg-amber-400/20 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-400/30"
-        onClick={reconnectAll}
+        onClick={reconnectFrom(openMediaPicker)}
       >
         {t('restore.reconnect')}
+      </button>
+      <button
+        className="flex-none rounded bg-amber-400/20 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-400/30"
+        onClick={reconnectFrom(openFolderPicker)}
+        title={t('restore.reconnectFolderHint')}
+      >
+        {t('restore.reconnectFolder')}
       </button>
       <button
         className="flex-none rounded px-2.5 py-1 font-medium text-amber-200/80 hover:bg-amber-400/10 hover:text-amber-100"

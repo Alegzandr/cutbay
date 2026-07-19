@@ -167,14 +167,14 @@ export function useContextMenuItems(target: ContextTarget): MenuEntry[] {
           onClick: () => st().addClipFromAsset(id),
         },
       ];
-      if (asset?.disconnected) {
-        items.push({
-          id: 'ctx.asset.reconnect',
-          labelKey: 'library.reconnect',
-          icon: PlugZap,
-          onClick: () => reconnectAssetViaPicker(id),
-        });
-      }
+      // Same action either way: reconnecting a lost file and pointing a healthy
+      // asset at another take are the same operation, only the intent differs.
+      items.push({
+        id: asset?.disconnected ? 'ctx.asset.reconnect' : 'ctx.asset.replace',
+        labelKey: asset?.disconnected ? 'library.reconnect' : 'library.replaceSource',
+        icon: PlugZap,
+        onClick: () => reconnectAssetViaPicker(id),
+      });
       items.push('---', {
         id: 'ctx.asset.remove',
         labelKey: 'library.remove',

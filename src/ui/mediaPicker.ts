@@ -23,9 +23,29 @@ const ACCEPT = [
 ].join(',');
 
 export function openMediaPicker(onFiles: (files: FileList) => void): void {
+  pick(onFiles, false);
+}
+
+/**
+ * Folder variant: the OS dialog selects a directory and hands back every file
+ * inside it. Used to relink sources in bulk after a folder was renamed or moved
+ * - the browser never exposes a path, so the caller matches on `file.name`.
+ * No `accept` filter here: it is ignored in directory mode, and the probe
+ * rejects anything unreadable anyway.
+ */
+export function openFolderPicker(onFiles: (files: FileList) => void): void {
+  pick(onFiles, true);
+}
+
+function pick(onFiles: (files: FileList) => void, directory: boolean): void {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = ACCEPT;
+  if (directory) {
+    // Not in the HTMLInputElement typings, but supported by every target browser.
+    (input as HTMLInputElement & { webkitdirectory: boolean }).webkitdirectory = true;
+  } else {
+    input.accept = ACCEPT;
+  }
   input.multiple = true;
   input.style.display = 'none';
   input.addEventListener('change', () => {
