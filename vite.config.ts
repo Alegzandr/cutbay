@@ -36,17 +36,25 @@ function injectCsp(): Plugin {
   };
 }
 
-// Base path = the GitHub repo name, for the GitHub Pages deployment.
-// Change BASE_PATH (or set the VITE_BASE env var) if the repo is renamed.
-const BASE_PATH = process.env.VITE_BASE ?? '/selfcut/';
+// The site is served from the root of the custom domain
+// (https://selfcut.alegzandr.com). Set VITE_BASE to override.
+const BASE_PATH = process.env.VITE_BASE ?? '/';
 
 export default defineConfig({
   base: BASE_PATH,
+  // Two pages: the static landing at / and the editor SPA at /app/.
+  appType: 'mpa',
   plugins: [react(), tailwindcss(), injectCsp()],
   worker: {
     format: 'es',
   },
   build: {
     target: 'es2022',
+    rollupOptions: {
+      input: {
+        landing: 'index.html',
+        app: 'app/index.html',
+      },
+    },
   },
 });

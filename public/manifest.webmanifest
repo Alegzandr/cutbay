@@ -3,8 +3,8 @@
   "short_name": "SelfCut",
   "description": "Éditeur vidéo 100 % dans le navigateur - aucun upload, aucun serveur.",
   "lang": "fr",
-  "start_url": ".",
-  "scope": ".",
+  "start_url": "/app/",
+  "scope": "/app/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#09090b",
@@ -28,5 +28,6 @@
       "type": "image/png",
       "purpose": "maskable"
     }
-  ]
+  ],
+  "id": "/app/"
 }
