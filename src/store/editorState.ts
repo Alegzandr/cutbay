@@ -90,6 +90,14 @@ export interface EditorState {
   timeFormat: TimeFormat;
   /** Preview playback resolution the user picked (persisted). */
   previewResolution: PreviewResolutionMode;
+  /**
+   * Master monitoring volume of the preview, linear gain in 0..1 (persisted).
+   * Purely a listening level: it scales the preview's master bus and never
+   * touches the project, so the export is unaffected.
+   */
+  previewVolume: number;
+  /** Master monitoring mute of the preview (persisted). Export is unaffected. */
+  previewMuted: boolean;
   clipboard: ClipboardEntry | null;
   exportOpen: boolean;
   importing: boolean;
@@ -248,6 +256,9 @@ export interface EditorState {
   setTimeFormat: (format: TimeFormat) => void;
   /** Pick the preview resolution rung; persisted. */
   setPreviewResolution: (mode: PreviewResolutionMode) => void;
+  /** Set the master monitoring gain (0..1); persisted. */
+  setPreviewVolume: (gain: number) => void;
+  togglePreviewMuted: () => void;
   setExportOpen: (open: boolean) => void;
   setImporting: (v: boolean) => void;
   setError: (msg: string | null) => void;

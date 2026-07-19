@@ -2,7 +2,12 @@ import type { StoreSet, StoreGet, SliceHelpers } from '../sliceHelpers';
 import type { EditorState } from '../editorState';
 import { clamp } from '../../lib/time';
 import { MIN_PX_PER_SEC, MAX_PX_PER_SEC } from '../../app/config';
-import { TIME_FORMAT_KEY, PREVIEW_RESOLUTION_KEY } from '../constants';
+import {
+  TIME_FORMAT_KEY,
+  PREVIEW_RESOLUTION_KEY,
+  PREVIEW_VOLUME_KEY,
+  PREVIEW_MUTED_KEY,
+} from '../constants';
 
 export function createUiSlice(
   set: StoreSet,
@@ -25,6 +30,8 @@ export function createUiSlice(
   | 'setRenamingMarker'
   | 'setTimeFormat'
   | 'setPreviewResolution'
+  | 'setPreviewVolume'
+  | 'togglePreviewMuted'
   | 'setExportOpen'
   | 'setError'
 > {
@@ -75,6 +82,26 @@ export function createUiSlice(
         /* private mode / no storage - the choice just won't persist */
       }
       set({ previewResolution: mode });
+    },
+
+    setPreviewVolume: (gain) => {
+      const v = clamp(gain, 0, 1);
+      try {
+        localStorage.setItem(PREVIEW_VOLUME_KEY, String(v));
+      } catch {
+        /* private mode / no storage - the choice just won't persist */
+      }
+      set({ previewVolume: v });
+    },
+
+    togglePreviewMuted: () => {
+      const muted = !get().previewMuted;
+      try {
+        localStorage.setItem(PREVIEW_MUTED_KEY, muted ? '1' : '0');
+      } catch {
+        /* private mode / no storage - the choice just won't persist */
+      }
+      set({ previewMuted: muted });
     },
 
     setExportOpen: (open) => set({ exportOpen: open }),

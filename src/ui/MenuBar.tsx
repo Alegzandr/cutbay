@@ -5,6 +5,7 @@ import logoUrl from '../assets/logo.png';
 import { APP_NAME } from '../app/config';
 import { useEditorCommands } from './commands';
 import { MenuList, type MenuEntry } from './menu/MenuList';
+import { MasterVolume } from './MasterVolume';
 
 /**
  * Desktop menu bar (File / Edit / …). The menu *structure* lives here as ids
@@ -98,6 +99,7 @@ export function MenuBar() {
       })}
 
       <div className="ml-auto" />
+      <MasterVolume />
     </div>
   );
 }

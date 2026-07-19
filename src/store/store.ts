@@ -10,7 +10,13 @@ import {
   DEFAULT_PREVIEW_RESOLUTION,
   type PreviewResolutionMode,
 } from '../app/config';
-import { HISTORY_LIMIT, TIME_FORMAT_KEY, PREVIEW_RESOLUTION_KEY } from './constants';
+import {
+  HISTORY_LIMIT,
+  TIME_FORMAT_KEY,
+  PREVIEW_RESOLUTION_KEY,
+  PREVIEW_VOLUME_KEY,
+  PREVIEW_MUTED_KEY,
+} from './constants';
 import type { EditorState } from './editorState';
 import { createProjectSlice } from './slices/projectSlice';
 import { createAssetsSlice } from './slices/assetsSlice';
@@ -41,6 +47,28 @@ function loadPreviewResolution(): PreviewResolutionMode {
     /* private mode / no storage - fall through to the default */
   }
   return DEFAULT_PREVIEW_RESOLUTION;
+}
+
+function loadPreviewVolume(): number {
+  try {
+    // Guard the raw string first: `Number(null)` is 0, which would silence the
+    // preview for anyone who has never touched the fader.
+    const raw = localStorage.getItem(PREVIEW_VOLUME_KEY);
+    const v = raw === null ? NaN : Number(raw);
+    if (Number.isFinite(v) && v >= 0 && v <= 1) return v;
+  } catch {
+    /* private mode / no storage - fall through to the default */
+  }
+  return 1;
+}
+
+function loadPreviewMuted(): boolean {
+  try {
+    return localStorage.getItem(PREVIEW_MUTED_KEY) === '1';
+  } catch {
+    /* private mode / no storage - fall through to the default */
+    return false;
+  }
 }
 
 export type { EditorState } from './editorState';
@@ -121,6 +149,8 @@ export const useStore = create<EditorState>((set, get) => {
     renamingMarkerId: null,
     timeFormat: loadTimeFormat(),
     previewResolution: loadPreviewResolution(),
+    previewVolume: loadPreviewVolume(),
+    previewMuted: loadPreviewMuted(),
     clipboard: null,
     exportOpen: false,
     importing: false,

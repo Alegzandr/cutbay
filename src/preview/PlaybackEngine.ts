@@ -33,6 +33,8 @@ export class PlaybackEngine {
   private ctx: CanvasRenderingContext2D;
   private audioCtx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  /** Master gain last written to the node - NaN forces the first write through. */
+  private lastMasterGain = NaN;
   private trackBuses = new Map<string, TrackBus>();
   private metersLive = false;
   private cursors = new Map<string, FrameCursor>();
@@ -112,6 +114,20 @@ export class PlaybackEngine {
     if (this.audioCtx.state === 'suspended') void this.audioCtx.resume();
   }
 
+  /**
+   * Push the master monitoring level onto the master bus. Listening level only:
+   * it sits after the meter taps, so the track meters keep showing the mix as it
+   * will be exported, and the export path never sees it at all.
+   */
+  private applyMasterVolume(state: EditorState): void {
+    if (!this.audioCtx || !this.masterGain) return;
+    const target = state.previewMuted ? 0 : state.previewVolume;
+    if (target === this.lastMasterGain) return;
+    this.lastMasterGain = target;
+    // Short ramp instead of a step: an instant gain jump clicks.
+    this.masterGain.gain.setTargetAtTime(target, this.audioCtx.currentTime, 0.01);
+  }
+
   /** (Re)start audio playback from a given timeline position. */
   private restartAt(state: EditorState, fromMs: number): void {
     if (!this.audioCtx || !this.masterGain) return;
@@ -185,6 +201,10 @@ export class PlaybackEngine {
       this.wasPlaying = false;
       this.stopAudio();
     }
+
+    // After ensureAudio, so the very first scheduled sources (which start at
+    // currentTime + 30 ms) already play at the user's monitoring level.
+    this.applyMasterVolume(state);
 
     // Shuttle rate changed mid-playback (J/L): re-anchor with the old rate, reschedule with the new.
     if (this.wasPlaying && state.playbackRate !== this.rate) {

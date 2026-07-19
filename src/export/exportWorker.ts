@@ -79,11 +79,29 @@ async function exportMp4(req: ExportRequest, preset: Mp4Preset): Promise<void> {
 
   // Fail fast with a translatable message when this browser cannot encode
   // H.264 at the requested size - otherwise the failure surfaces mid-render as
-  // a raw native crash string.
-  if (!(await canEncodeVideo('avc', { width, height }))) {
+  // a raw native crash string. The bitrate is part of the probe because a
+  // configuration can be rejected on bitrate alone (our 4K preset asks for
+  // 60 Mbps), and a geometry-only check would wave it through.
+  if (!(await canEncodeVideo('avc', { width, height, bitrate: preset.videoBitrate }))) {
     throw new ExportError('videoEncoderUnsupported');
   }
-  if (audio && !(await canEncodeAudio('aac'))) registerAacEncoder();
+  // Probe the exact configuration we are about to use, not just the codec: the
+  // native AAC encoder advertises support for 'aac' in general while rejecting
+  // specific parameter sets. Chrome tops out at 192 kbps for stereo 48 kHz,
+  // well under the 384 kbps every MP4 preset asks for, so the bare-codec check
+  // left the fallback encoder unregistered and the failure only surfaced at the
+  // end of the render (audio is encoded after every video frame) as a raw
+  // encoder string.
+  if (
+    audio &&
+    !(await canEncodeAudio('aac', {
+      numberOfChannels: audio.channels.length,
+      sampleRate: audio.sampleRate,
+      bitrate: preset.audioBitrate,
+    }))
+  ) {
+    registerAacEncoder();
+  }
 
   const target = new BufferTarget();
   const output = new Output({
@@ -250,7 +268,18 @@ async function exportMp3(req: ExportRequest): Promise<void> {
   const { preset, audio } = req;
   if (!audio) throw new ExportError('noAudibleAudio');
 
-  if (!(await canEncodeAudio('mp3'))) registerMp3Encoder();
+  // Same reasoning as the AAC probe in exportMp4: the parameters are part of
+  // what has to be supported, so the fallback encoder is registered whenever
+  // the native one cannot take this exact configuration.
+  if (
+    !(await canEncodeAudio('mp3', {
+      numberOfChannels: audio.channels.length,
+      sampleRate: audio.sampleRate,
+      bitrate: preset.audioBitrate,
+    }))
+  ) {
+    registerMp3Encoder();
+  }
 
   const target = new BufferTarget();
   const output = new Output({ format: new Mp3OutputFormat(), target });
