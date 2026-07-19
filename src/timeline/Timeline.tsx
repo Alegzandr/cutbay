@@ -295,7 +295,9 @@ export function Timeline() {
           <TimelineOverlay pxPerMs={pxPerMs} trackCount={project.tracks.length} />
           <SnapGuide />
 
-          <div className="sticky left-0 z-20 flex w-fit gap-2 p-2">
+          {/* Opaque: sticky + z-20 alone would still let the playhead bar show
+              through, the same way the track headers rely on their own bg. */}
+          <div className="sticky left-0 z-20 flex w-fit gap-2 bg-zinc-950 p-2">
             <button
               className="touch-hit rounded-md border border-dashed border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 active:bg-zinc-800 pointer-coarse:py-2"
               onClick={() => addTrack('video')}
