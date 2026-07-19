@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { Trash2, X } from 'lucide-react';
@@ -22,15 +23,19 @@ export function Inspector() {
   // A linked video clip delegates its sound to the audio clip on the lane
   // below (it is silent in the mix): audio edits must target that partner,
   // otherwise the volume/balance controls are dead knobs.
-  const audioClip = useStore((s) => {
+  // Derived from `project` rather than inside a selector: a store selector runs
+  // on every set(), and the playback engine writes the current time 60 times a
+  // second, so this track scan used to run once per frame during playback.
+  const project = useStore((s) => s.project);
+  const audioClip = useMemo(() => {
     if (!clip?.linkId) return clip;
-    for (const track of s.project.tracks) {
+    for (const track of project.tracks) {
       if (track.kind !== 'audio') continue;
       const partner = track.clips.find((c) => c.linkId === clip.linkId && c.id !== clip.id);
       if (partner) return partner;
     }
     return clip;
-  });
+  }, [project, clip]);
 
   // Desktop: docked column next to the preview - it must never cover the
   // timeline, that is where the cutting happens. Mobile: bottom sheet opened

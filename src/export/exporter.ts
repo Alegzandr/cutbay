@@ -9,8 +9,58 @@ import { ExportPreset, exportFileName, resolveMp4Preset } from './presets';
 import { ExportErrorCode, ExportRequest, WorkerReply } from './protocol';
 
 export interface ExportHandle {
-  promise: Promise<{ blob: Blob; filename: string }>;
+  /**
+   * `blob` is null when the render streamed straight into a file the user
+   * picked: the file is already on disk, so there is nothing left to download.
+   */
+  promise: Promise<{ blob: Blob | null; filename: string }>;
   cancel: () => void;
+}
+
+/**
+ * The user backed out (dismissed the save picker). Distinct from a failure so
+ * the sheet returns to its idle state instead of showing an error screen.
+ */
+export class ExportCanceledError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ExportCanceledError';
+  }
+}
+
+interface SaveFilePickerWindow {
+  showSaveFilePicker?: (options: {
+    suggestedName: string;
+    types: { description: string; accept: Record<string, string[]> }[];
+  }) => Promise<FileSystemFileHandle>;
+}
+
+/**
+ * Ask where to save, so the worker can mux straight into that file instead of
+ * building the whole output in memory.
+ *
+ * Must be reached without awaiting anything first: the picker needs transient
+ * user activation, which the click that started the export only carries until
+ * the first suspension point. Returns null when the browser has no File System
+ * Access API (Firefox, Safari), which selects the buffered fallback path.
+ */
+async function pickExportFile(filename: string, mime: string): Promise<FileSystemFileHandle | null> {
+  const show = (window as unknown as SaveFilePickerWindow).showSaveFilePicker;
+  if (!show) return null;
+  const ext = filename.slice(filename.lastIndexOf('.'));
+  try {
+    return await show({
+      suggestedName: filename,
+      types: [{ description: t('export.fileType'), accept: { [mime]: [ext] } }],
+    });
+  } catch (err) {
+    // Dismissing the picker aborts the export; anything else falls back to the
+    // in-memory path rather than blocking the render outright.
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ExportCanceledError(t('errors.export.canceled'));
+    }
+    return null;
+  }
 }
 
 /** The worker speaks in codes; the main thread owns the locale and the wording. */
@@ -65,17 +115,10 @@ export function startExport(
       throw new Error(t('errors.export.emptyRegion'));
     }
 
-    onProgress(0.02);
-    const audio = await renderAudioMix(project, assets, startMs, durationMs);
-    if (canceled) throw new Error(t('errors.export.canceled'));
-    onProgress(0.1);
-    if (preset.kind === 'mp3' && !audio) {
-      throw new Error(t(ERROR_KEYS.noAudibleAudio));
-    }
-
     // A disconnected source would crash the worker mid-render (or silently drop
     // audio from the mp3 mix) when it reads the stale File: refuse upfront with
-    // a clear message. Cheap scan, so it runs for every preset.
+    // a clear message. Cheap scan, so it runs for every preset. Checked before
+    // the save picker so a doomed export never asks where to put its output.
     const disconnected = new Set<string>();
     for (const track of project.tracks) {
       for (const clip of track.clips) {
@@ -87,6 +130,22 @@ export function startExport(
       throw new Error(
         t('errors.export.disconnectedSources', { names: [...disconnected].join(', ') }),
       );
+    }
+
+    // First await of the run: everything above is synchronous so the picker
+    // still runs under the activation of the click that started the export.
+    const filename = exportFileName(preset);
+    const fileHandle = await pickExportFile(
+      filename,
+      preset.kind === 'mp3' ? 'audio/mpeg' : 'video/mp4',
+    );
+
+    onProgress(0.02);
+    const audio = await renderAudioMix(project, assets, startMs, durationMs);
+    if (canceled) throw new Error(t('errors.export.canceled'));
+    onProgress(0.1);
+    if (preset.kind === 'mp3' && !audio) {
+      throw new Error(t(ERROR_KEYS.noAudibleAudio));
     }
 
     // Adapt frame rate (and, with it, bitrate) to the project's source footage
@@ -139,9 +198,10 @@ export function startExport(
       startMs,
       durationMs,
       audio,
+      fileHandle,
     };
 
-    const buffer = await new Promise<{ buffer: ArrayBuffer; mime: string }>((resolve, reject) => {
+    const buffer = await new Promise<{ buffer: ArrayBuffer | null; mime: string }>((resolve, reject) => {
       rejectWorkerReply = reject;
       worker!.onmessage = (e: MessageEvent<WorkerReply>) => {
         const msg = e.data;
@@ -160,7 +220,12 @@ export function startExport(
     rejectWorkerReply = null;
 
     onProgress(1);
-    return { blob: new Blob([buffer.buffer], { type: buffer.mime }), filename: exportFileName(preset) };
+    // Streamed renders are already on disk; only the buffered fallback still
+    // has to materialize a Blob for the download anchor.
+    return {
+      blob: buffer.buffer ? new Blob([buffer.buffer], { type: buffer.mime }) : null,
+      filename,
+    };
   })();
 
   const promise = Promise.race([run, cancelation]).finally(() => {
@@ -194,6 +259,7 @@ async function renderAudioMix(
   durationMs: number,
 ): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
   const buffers = new Map<string, AudioBuffer | null>();
+  const pending: Promise<void>[] = [];
   let hasAudibleClip = false;
 
   const delegated = delegatedLinkIds(project);
@@ -210,13 +276,24 @@ async function renderAudioMix(
       const asset = assets[clip.assetId];
       if (!asset?.hasAudio) continue;
       const key = audioKey(asset.id, clip.audioTrackIndex);
+      // Kicked off, not awaited: decoding one source at a time serialized the
+      // whole pre-roll of an export, and these decodes are independent.
       if (!buffers.has(key)) {
-        buffers.set(key, await getAudioBuffer(asset, clip.audioTrackIndex));
+        buffers.set(key, null);
+        pending.push(
+          getAudioBuffer(asset, clip.audioTrackIndex).then((buffer) => {
+            buffers.set(key, buffer);
+          }),
+        );
       }
-      if (buffers.get(key)) hasAudibleClip = true;
+      // An asset with an audio track counts as audible here; a source that
+      // turns out to decode to nothing is filtered out below.
+      hasAudibleClip = true;
     }
   }
   if (!hasAudibleClip) return null;
+  await Promise.all(pending);
+  if (![...buffers.values()].some(Boolean)) return null;
 
   const length = Math.max(1, Math.ceil((durationMs / 1000) * AUDIO_SAMPLE_RATE));
   const ctx = new OfflineAudioContext(2, length, AUDIO_SAMPLE_RATE);

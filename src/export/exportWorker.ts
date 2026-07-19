@@ -8,6 +8,7 @@ import {
   Mp4OutputFormat,
   Mp3OutputFormat,
   BufferTarget,
+  StreamTarget,
   CanvasSource,
   AudioSampleSource,
   AudioSample,
@@ -39,6 +40,109 @@ class ExportError extends Error {
   constructor(readonly code: ExportErrorCode) {
     super(code);
     this.name = 'ExportError';
+  }
+}
+
+/** One clip to composite into the current frame, with its decoded source frame. */
+interface FrameLayer {
+  clip: Clip;
+  xfadeInMs: number;
+  alphaMul: number;
+  sample: DrawableFrame | null;
+}
+
+/**
+ * Sequential frame reader for one clip.
+ *
+ * An export walks a clip's source time strictly forward, so frames come from a
+ * `samples()` async iterator: every packet is decoded exactly once and the
+ * decoder stays configured for the whole clip. `getSample()` cannot do that -
+ * it spins up a fresh `VideoDecoder` and re-decodes from the preceding key
+ * frame on every call, so a 2 s GOP means decoding up to 60 frames to obtain
+ * one. That is the same trap `FrameCursor` documents on the preview side, and
+ * it dominated render time here.
+ */
+class ClipReader {
+  private sink: VideoSampleSink | null = null;
+  private opened = false;
+  private iterator: AsyncGenerator<VideoSample, void, unknown> | null = null;
+  private exhausted = false;
+  private current: VideoSample | null = null;
+  private lookahead: VideoSample | null = null;
+  private lastSec = 0;
+
+  constructor(
+    private readonly clip: Clip,
+    private readonly openSink: (clip: Clip) => Promise<VideoSampleSink | null>,
+  ) {}
+
+  /** The source frame to display at `sourceSec`, or null if nothing decodes. */
+  async frameAt(sourceSec: number): Promise<VideoSample | null> {
+    if (!this.opened) {
+      this.opened = true;
+      this.sink = await this.openSink(this.clip);
+    }
+    if (!this.sink) return null;
+    const target = Math.max(0, sourceSec);
+
+    // Source time normally advances with output time, but a reversed or ramped
+    // speed can jump: restart the iterator rather than decode the gap.
+    if (this.iterator && (target < this.lastSec || target > this.lastSec + 1)) {
+      await this.stopIterator();
+    }
+    if (!this.iterator) {
+      this.iterator = this.sink.samples(target);
+      this.exhausted = false;
+    }
+
+    // Advance while the next frame still starts at or before the target; the
+    // last one reached is the frame on screen at that instant.
+    while (!this.exhausted) {
+      if (!this.lookahead) {
+        const { value, done } = await this.iterator.next();
+        if (done || !value) {
+          this.exhausted = true;
+          break;
+        }
+        // Take exclusive ownership: mediabunny's iterator can close a yielded
+        // sample again from its own cleanup when iteration starts past the last
+        // frame. Cloning is a refcount bump and makes that stray close() a no-op.
+        this.lookahead = value.clone();
+        value.close();
+      }
+      if (this.current && this.lookahead.timestamp > target) break;
+      this.current?.close();
+      this.current = this.lookahead;
+      this.lookahead = null;
+    }
+
+    this.lastSec = target;
+    // Past the last frame of the source, the clip holds on its final frame.
+    return this.current;
+  }
+
+  /** Release the iterator and every frame it still holds. */
+  async close(): Promise<void> {
+    await this.stopIterator();
+  }
+
+  private async stopIterator(): Promise<void> {
+    this.lookahead?.close();
+    this.lookahead = null;
+    // Dropped too: after a seek the pre-seek frame is no longer what plays at
+    // the new time, so the first sample the restarted iterator yields wins.
+    this.current?.close();
+    this.current = null;
+    const it = this.iterator;
+    this.iterator = null;
+    this.exhausted = false;
+    if (it) {
+      try {
+        await it.return(undefined);
+      } catch {
+        // Iterator cleanup failures are non-fatal.
+      }
+    }
   }
 }
 
@@ -103,14 +207,32 @@ async function exportMp4(req: ExportRequest, preset: Mp4Preset): Promise<void> {
     registerAacEncoder();
   }
 
-  const target = new BufferTarget();
+  const totalFrames = Math.max(1, Math.ceil((durationMs / 1000) * preset.fps));
+
+  // Streaming straight into the user's file keeps memory flat and still puts
+  // the metadata up front ('reserve' writes moov into space reserved at the
+  // head, rather than buffering every chunk to place it there at the end).
+  // That mode needs an upper bound on packets per track, and overshooting only
+  // reserves a few unused bytes while undershooting aborts the render, so both
+  // bounds below are deliberately loose.
+  const writable = req.fileHandle ? await req.fileHandle.createWritable() : null;
+  const target = writable ? new StreamTarget(writable, { chunked: true }) : new BufferTarget();
   const output = new Output({
-    format: new Mp4OutputFormat({ fastStart: 'in-memory' }),
+    format: new Mp4OutputFormat({ fastStart: writable ? 'reserve' : 'in-memory' }),
     target,
   });
+  // One encoded packet per frame added.
+  const videoPackets = totalFrames;
+  // AAC-LC packs 1024 samples per packet; assume half that, plus slack for the
+  // encoder's priming and flush packets.
+  const audioPackets = audio ? Math.ceil(audio.channels[0]!.length / 512) + 64 : 0;
 
   const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext('2d')!;
+  // No alpha channel: every frame starts as an opaque black fill, so the canvas
+  // never needs one. Dropping it skips premultiplied blending on each drawImage
+  // and lets the capture go straight to YUV - measurable at 4K over thousands
+  // of frames.
+  const ctx = canvas.getContext('2d', { alpha: false })!;
   // High-quality resampling so every export resolution (incl. 4K downscales and
   // upscaled sources) gets the cleanest fit/crop/zoom, not the default 'low' pass.
   ctx.imageSmoothingEnabled = true;
@@ -126,12 +248,12 @@ async function exportMp4(req: ExportRequest, preset: Mp4Preset): Promise<void> {
     // seeking/scrubbing responsive on the platforms without bloating the file.
     keyFrameInterval: 2,
   });
-  output.addVideoTrack(videoSource);
+  output.addVideoTrack(videoSource, writable ? { maximumPacketCount: videoPackets } : undefined);
 
   let audioSource: AudioSampleSource | null = null;
   if (audio) {
     audioSource = new AudioSampleSource({ codec: 'aac', bitrate: preset.audioBitrate });
-    output.addAudioTrack(audioSource);
+    output.addAudioTrack(audioSource, writable ? { maximumPacketCount: audioPackets } : undefined);
   }
 
   await output.start();
@@ -148,80 +270,97 @@ async function exportMp4(req: ExportRequest, preset: Mp4Preset): Promise<void> {
     return input;
   };
 
-  // One sink per clip: source timestamps are monotonic within a clip,
-  // which keeps each decoder in efficient sequential mode.
-  const sinks = new Map<string, VideoSampleSink | null>();
-  const getSink = async (clip: Clip): Promise<VideoSampleSink | null> => {
-    if (sinks.has(clip.id)) return sinks.get(clip.id)!;
-    let sink: VideoSampleSink | null = null;
+  const openSink = async (clip: Clip): Promise<VideoSampleSink | null> => {
     const input = getInput(clip.assetId);
-    if (input) {
-      try {
-        const track = await input.getPrimaryVideoTrack();
-        if (track && (await track.canDecode())) sink = new VideoSampleSink(track);
-      } catch {
-        // Unreadable source (e.g. a still that failed to rasterize): the clip
-        // renders nothing rather than killing the whole export.
-      }
+    if (!input) return null;
+    try {
+      const track = await input.getPrimaryVideoTrack();
+      if (track && (await track.canDecode())) return new VideoSampleSink(track);
+    } catch {
+      // Unreadable source (e.g. a still that failed to rasterize): the clip
+      // renders nothing rather than killing the whole export.
     }
-    sinks.set(clip.id, sink);
-    return sink;
+    return null;
   };
 
-  // Last decoded sample per clip, reused when the sink has no newer frame.
-  const lastSamples = new Map<string, VideoSample>();
+  // One reader per clip, created on first use and kept for the whole render.
+  const readers = new Map<string, ClipReader>();
+  const getReader = (clip: Clip): ClipReader => {
+    let reader = readers.get(clip.id);
+    if (!reader) {
+      reader = new ClipReader(clip, openSink);
+      readers.set(clip.id, reader);
+    }
+    return reader;
+  };
 
-  const totalFrames = Math.max(1, Math.ceil((durationMs / 1000) * preset.fps));
   const frameDur = 1 / preset.fps;
   const videoWeight = audio ? 0.92 : 0.98;
 
   let finished = false;
+  // Encode of the previous frame, awaited only once the next one is decoded, so
+  // the encoder runs while the decoders do. CanvasSource.add() snapshots the
+  // canvas synchronously and only the returned promise is deferred, so the
+  // frame it captured is never the one we are about to draw.
+  let pendingEncode: Promise<void> | null = null;
   try {
     for (let i = 0; i < totalFrames; i++) {
       // Output time i/fps maps to timeline time startMs + i/fps: exporting a
       // region shifts what we read, never where the frame lands in the file.
       const tMs = startMs + (i * 1000) / preset.fps;
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, width, height);
 
-      for (const track of project.tracks) {
+      // Bottom-up over tracks so the timeline's top lane paints last, then
+      // earliest-first within a track: during a crossfade the incoming clip
+      // composites over the outgoing one with rising alpha (same as preview).
+      const layers: FrameLayer[] = [];
+      for (let t = project.tracks.length - 1; t >= 0; t--) {
+        const track = project.tracks[t]!;
         const alphaMul = track.opacity ?? 1;
         if (alphaMul <= 0) continue;
-        // Earliest-first: during a crossfade the incoming clip composites over
-        // the outgoing one with rising alpha (same as the preview).
         for (const { clip, xfadeInMs } of visibleVideoClips(track, tMs)) {
-          let sample: DrawableFrame | null = null;
-          if (clip.kind === 'media') {
-            const still = stills.get(clip.assetId);
-            if (still) {
-              // A still is the same frame at every output time - nothing to decode.
-              sample = still;
-            } else {
-              const sink = await getSink(clip);
-              if (!sink) continue;
-              const sourceSec = timelineToSourceMs(clip, tMs) / 1000;
-              const decoded = await sink.getSample(Math.max(0, sourceSec));
-              if (decoded) {
-                lastSamples.get(clip.id)?.close();
-                lastSamples.set(clip.id, decoded);
-              }
-              sample = decoded ?? lastSamples.get(clip.id) ?? null;
-            }
-          }
-          drawClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs, sample);
+          layers.push({ clip, xfadeInMs, alphaMul, sample: null });
         }
       }
 
-      await videoSource.add(i * frameDur, frameDur);
+      // Decode every visible media clip concurrently: the readers are
+      // independent, so N stacked tracks cost one decode wait instead of N.
+      await Promise.all(
+        layers.map(async (layer) => {
+          const { clip } = layer;
+          if (clip.kind !== 'media') return;
+          const still = stills.get(clip.assetId);
+          if (still) {
+            // A still is the same frame at every output time - nothing to decode.
+            layer.sample = still;
+            return;
+          }
+          layer.sample = await getReader(clip).frameAt(timelineToSourceMs(clip, tMs) / 1000);
+        }),
+      );
+
+      if (pendingEncode) {
+        await pendingEncode;
+        pendingEncode = null;
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+      for (const { clip, xfadeInMs, alphaMul, sample } of layers) {
+        drawClip(ctx, clip, width, height, tMs, alphaMul, xfadeInMs, sample);
+      }
+
+      pendingEncode = videoSource.add(i * frameDur, frameDur);
       // Post every 5th frame, but always on the last one, so a very short
       // (<5-frame) region still advances the bar past the video phase instead
       // of jumping straight from 0 to finalize.
       if (i % 5 === 0 || i === totalFrames - 1) postProgress((i / totalFrames) * videoWeight);
     }
+    await pendingEncode;
+    pendingEncode = null;
 
-    for (const sample of lastSamples.values()) sample.close();
-    lastSamples.clear();
+    for (const reader of readers.values()) await reader.close();
+    readers.clear();
     for (const still of stills.values()) still.close();
     stills.clear();
     videoSource.close();
@@ -235,21 +374,21 @@ async function exportMp4(req: ExportRequest, preset: Mp4Preset): Promise<void> {
     await output.finalize();
     finished = true;
 
-    worker.postMessage(
-      { type: 'done', buffer: target.buffer!, mime: 'video/mp4' },
-      { transfer: [target.buffer!] },
-    );
+    postDone(target, 'video/mp4');
   } finally {
     // On any failure path, release the decoded frames and rasterized stills the
     // success path would have closed (WebCodecs frames are scarce), and always
     // dispose the source inputs. The success path already cleared these maps, so
     // this only does work when the render threw.
     if (!finished) {
-      for (const sample of lastSamples.values()) {
+      // A deferred encode still in flight would otherwise reject unhandled once
+      // the render has already failed for another reason.
+      pendingEncode?.catch(() => {});
+      for (const reader of readers.values()) {
         try {
-          sample.close();
+          await reader.close();
         } catch {
-          /* already closed */
+          /* already released */
         }
       }
       for (const still of stills.values()) {
@@ -260,7 +399,29 @@ async function exportMp4(req: ExportRequest, preset: Mp4Preset): Promise<void> {
         }
       }
     }
+    if (!finished) {
+      // Release the destination file: without this the writable stays open and
+      // the user is left with a locked, half-written file.
+      try {
+        await output.cancel();
+      } catch {
+        /* already torn down */
+      }
+    }
     for (const input of inputs.values()) input.dispose();
+  }
+}
+
+/**
+ * Hand the finished file back. A buffered render transfers its ArrayBuffer
+ * (zero-copy); a streamed one has already written everything to disk and only
+ * reports the mime type.
+ */
+function postDone(target: BufferTarget | StreamTarget, mime: string): void {
+  if (target instanceof BufferTarget) {
+    worker.postMessage({ type: 'done', buffer: target.buffer!, mime }, { transfer: [target.buffer!] });
+  } else {
+    worker.postMessage({ type: 'done', buffer: null, mime });
   }
 }
 
@@ -281,20 +442,33 @@ async function exportMp3(req: ExportRequest): Promise<void> {
     registerMp3Encoder();
   }
 
-  const target = new BufferTarget();
+  // Same destination handling as the video path, so both presets behave the
+  // same way. An mp3 is small enough that memory was never the issue here - it
+  // is about the file landing where the user asked for it.
+  const writable = req.fileHandle ? await req.fileHandle.createWritable() : null;
+  const target = writable ? new StreamTarget(writable, { chunked: true }) : new BufferTarget();
   const output = new Output({ format: new Mp3OutputFormat(), target });
   const audioSource = new AudioSampleSource({ codec: 'mp3', bitrate: preset.audioBitrate });
   output.addAudioTrack(audioSource);
   await output.start();
 
-  await pushAudioMix(audioSource, audio, (v) => postProgress(v * 0.97));
-  audioSource.close();
+  let finished = false;
+  try {
+    await pushAudioMix(audioSource, audio, (v) => postProgress(v * 0.97));
+    audioSource.close();
 
-  await output.finalize();
-  worker.postMessage(
-    { type: 'done', buffer: target.buffer!, mime: 'audio/mpeg' },
-    { transfer: [target.buffer!] },
-  );
+    await output.finalize();
+    finished = true;
+    postDone(target, 'audio/mpeg');
+  } finally {
+    if (!finished) {
+      try {
+        await output.cancel();
+      } catch {
+        /* already torn down */
+      }
+    }
+  }
 }
 
 /** Feed the pre-rendered mix to the encoder in ~1 s planar chunks. */

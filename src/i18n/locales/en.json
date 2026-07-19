@@ -132,6 +132,7 @@
   "export.cta": "Export {{preset}}",
   "export.cta.region": "Export {{preset}} (region)",
   "export.downloadAgain": "Download again",
+  "export.fileType": "Exported file",
   "export.newExport": "New export",
   "export.privacy": "Everything renders on your device - nothing is uploaded.",
   "export.regionOnly": "Render the selected region only -",

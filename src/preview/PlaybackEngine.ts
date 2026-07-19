@@ -6,8 +6,8 @@ import { audioKey, getAudioBuffer, getStillFrame } from '../media/mediaCache';
 import type { DrawableFrame } from '../media/stillImage';
 import { FrameCursor } from './FrameCursor';
 import { drawClip, visibleVideoClips } from './compositor';
-import { ScheduledSource, scheduleProjectAudio, stopScheduled } from './audioMix';
-import { TrackLevels, publishLevels } from './meterBus';
+import { ScheduledSource, sameAudioMix, scheduleProjectAudio, stopScheduled } from './audioMix';
+import { TrackLevels, hasLevelListeners, publishLevels } from './meterBus';
 
 /**
  * After the playhead stops, delay before the paused still is re-rendered at full
@@ -212,10 +212,16 @@ export class PlaybackEngine {
     }
 
     if (state.project !== this.lastProject) {
+      const previous = this.lastProject;
       this.lastProject = state.project;
       this.videoDirty = true;
       this.pruneCursors(state.project);
-      if (this.wasPlaying) this.restartAt(state, this.playbackTimeMs(state));
+      // Only an edit that changes the mix is worth tearing the graph down for:
+      // a transform drag fires updateClip on every pointermove, and
+      // rescheduling there stutters the audio for nothing.
+      if (this.wasPlaying && !sameAudioMix(previous, state.project)) {
+        this.restartAt(state, this.playbackTimeMs(state));
+      }
     }
 
     if (this.audioDirty) {
@@ -286,10 +292,14 @@ export class PlaybackEngine {
     this.ctx.fillStyle = '#000';
     this.ctx.fillRect(0, 0, w, h);
 
-    // Track order defines z-order: the last video track draws on top. Within
-    // a track, an overlapping pair draws earliest-first - the incoming clip
-    // composites over the outgoing one with rising alpha (crossfade).
-    for (const track of state.project.tracks) {
+    // Track order defines z-order the way the timeline shows it: the first
+    // track is the top lane, so tracks paint bottom-up and the top lane lands
+    // last, over the others. Within a track, an overlapping pair draws
+    // earliest-first - the incoming clip composites over the outgoing one with
+    // rising alpha (crossfade).
+    const tracks = state.project.tracks;
+    for (let t = tracks.length - 1; t >= 0; t--) {
+      const track = tracks[t]!;
       const alphaMul = track.opacity ?? 1;
       if (alphaMul <= 0) continue;
       for (const { clip, xfadeInMs } of visibleVideoClips(track, tMs)) {
@@ -331,7 +341,7 @@ export class PlaybackEngine {
 
   /** Feed the track header meters (peak per track) while audio is playing. */
   private publishMeters(): void {
-    if (this.wasPlaying && this.trackBuses.size > 0) {
+    if (this.wasPlaying && this.trackBuses.size > 0 && hasLevelListeners()) {
       const levels: TrackLevels = {};
       for (const [trackId, bus] of this.trackBuses) {
         bus.analyser.getFloatTimeDomainData(bus.data);

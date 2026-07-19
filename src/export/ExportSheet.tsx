@@ -5,12 +5,13 @@ import { CheckCircle2, Download, Loader2, X, XCircle } from 'lucide-react';
 import { useStore } from '../store/store';
 import { formatTime } from '../lib/time';
 import { presetsForAspect, projectExportFps, videoBitrateForFps, ExportPreset } from './presets';
-import { startExport, downloadBlob, ExportHandle } from './exporter';
+import { startExport, downloadBlob, ExportCanceledError, ExportHandle } from './exporter';
 
 type Phase =
   | { kind: 'idle' }
   | { kind: 'rendering'; progress: number }
-  | { kind: 'done'; filename: string; blob: Blob }
+  /** `blob` is null when the render went straight to the file the user picked. */
+  | { kind: 'done'; filename: string; blob: Blob | null }
   | { kind: 'error'; message: string };
 
 export function ExportSheet() {
@@ -71,11 +72,17 @@ export function ExportSheet() {
     handleRef.current = handle;
     handle.promise
       .then(({ blob, filename }) => {
-        downloadBlob(blob, filename);
+        // Nothing to download when the worker streamed into the user's file.
+        if (blob) downloadBlob(blob, filename);
         setPhase({ kind: 'done', filename, blob });
       })
       .catch((err: unknown) => {
-        if (canceledRef.current) return; // user-initiated: back to idle, not an error
+        // User-initiated (cancel button, or dismissing the save picker): back
+        // to idle, not an error.
+        if (canceledRef.current || err instanceof ExportCanceledError) {
+          setPhase({ kind: 'idle' });
+          return;
+        }
         setPhase({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
       })
       .finally(() => {
@@ -225,12 +232,14 @@ export function ExportSheet() {
                   />
                 </p>
                 <div className="flex gap-2">
-                  <button
-                    className="flex-1 rounded-xl border border-zinc-700 py-2 text-sm text-zinc-300 active:bg-zinc-800"
-                    onClick={() => downloadBlob(phase.blob, phase.filename)}
-                  >
-                    {t('export.downloadAgain')}
-                  </button>
+                  {phase.blob && (
+                    <button
+                      className="flex-1 rounded-xl border border-zinc-700 py-2 text-sm text-zinc-300 active:bg-zinc-800"
+                      onClick={() => downloadBlob(phase.blob!, phase.filename)}
+                    >
+                      {t('export.downloadAgain')}
+                    </button>
+                  )}
                   <button
                     className="flex-1 rounded-xl bg-sky-500 py-2 text-sm font-semibold text-white active:bg-sky-600"
                     onClick={() => setPhase({ kind: 'idle' })}

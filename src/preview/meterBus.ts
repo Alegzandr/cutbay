@@ -12,6 +12,15 @@ export function publishLevels(levels: TrackLevels): void {
   for (const fn of listeners) fn(levels);
 }
 
+/**
+ * Whether any meter is currently mounted. The engine reads the analysers and
+ * scans 1024 samples per track every frame to produce these levels, which is
+ * pure waste when the track headers are collapsed or off-screen.
+ */
+export function hasLevelListeners(): boolean {
+  return listeners.size > 0;
+}
+
 export function subscribeLevels(fn: (levels: TrackLevels) => void): () => void {
   listeners.add(fn);
   return () => {

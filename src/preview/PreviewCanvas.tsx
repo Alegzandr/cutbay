@@ -31,6 +31,7 @@ function CropOverlay({ clip, asset }: { clip: Clip; asset: MediaAsset }) {
     startNx: number;
     startNy: number;
     orig: ClipTransform['crop'];
+    rect: DOMRect;
   } | null>(null);
 
   const tf = clip.transform ?? DEFAULT_TRANSFORM;
@@ -38,33 +39,33 @@ function CropOverlay({ clip, asset }: { clip: Clip; asset: MediaAsset }) {
   const aspect = (asset.width ?? 16) / (asset.height ?? 9);
 
   // Frame shown under the rectangle: the thumbnail closest to the playhead.
-  const srcMs = timelineToSourceMs(clip, useStore.getState().currentTimeMs);
+  // Subscribing to the derived URL rather than to `currentTimeMs` keeps this in
+  // sync while the playhead moves (reading getState() here left it frozen at
+  // whatever time crop mode was opened) without re-rendering on every frame:
+  // the selector runs per frame, but its result only changes when the playhead
+  // crosses into the next thumbnail.
   const thumbs = asset.thumbnails;
-  const thumb =
-    thumbs.length > 0
-      ? thumbs[
-          clamp(Math.round((srcMs / asset.durationMs) * (thumbs.length - 1)), 0, thumbs.length - 1)
-        ]
-      : undefined;
-
-  const normPoint = (e: React.PointerEvent) => {
-    const r = frameRef.current!.getBoundingClientRect();
-    return { nx: (e.clientX - r.left) / r.width, ny: (e.clientY - r.top) / r.height };
-  };
+  const thumb = useStore((s) => {
+    if (thumbs.length === 0) return undefined;
+    const srcMs = timelineToSourceMs(clip, s.currentTimeMs);
+    const i = clamp(Math.round((srcMs / asset.durationMs) * (thumbs.length - 1)), 0, thumbs.length - 1);
+    return thumbs[i];
+  });
 
   const onDown = (e: React.PointerEvent, handle: CropHandle) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    const { nx, ny } = normPoint(e);
+    const rect = frameRef.current!.getBoundingClientRect();
+    const { nx, ny } = normPointIn(rect, e);
     useStore.getState().beginGesture();
-    drag.current = { handle, startNx: nx, startNy: ny, orig: { ...crop } };
+    drag.current = { handle, startNx: nx, startNy: ny, orig: { ...crop }, rect };
   };
 
   const onMove = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d) return;
-    const { nx, ny } = normPoint(e);
+    const { nx, ny } = normPointIn(d.rect, e);
     const dx = nx - d.startNx;
     const dy = ny - d.startNy;
     const o = d.orig;
@@ -166,6 +167,8 @@ interface PreviewDrag {
   origX: number;
   origY: number;
   moved: boolean;
+  /** Stage rect captured at pointerdown - see `normPointIn`. */
+  rect: DOMRect;
 }
 
 interface PreviewResize {
@@ -176,6 +179,36 @@ interface PreviewResize {
   centerNy: number;
   /** Pointer distance from the center when the drag started. */
   startDist: number;
+  /** Stage rect captured at pointerdown - see `normPointIn`. */
+  rect: DOMRect;
+}
+
+/**
+ * Normalize a pointer position against a rect captured when the drag started.
+ *
+ * Measuring on every pointermove instead forces a synchronous layout, and the
+ * same handler then writes to the store (which commits DOM) - a read-after-
+ * write cycle per event. The stage cannot move mid-drag: the pointer is
+ * captured and its size is driven by the panel, not by anything the drag
+ * changes.
+ */
+function normPointIn(rect: DOMRect, e: React.PointerEvent): { nx: number; ny: number } {
+  return { nx: (e.clientX - rect.left) / rect.width, ny: (e.clientY - rect.top) / rect.height };
+}
+
+/** The clip with this id, without flattening every track on each lookup. */
+function findClip(project: Project, clipId: string): Clip | null {
+  for (const track of project.tracks) {
+    for (const clip of track.clips) {
+      if (clip.id === clipId) return clip;
+    }
+  }
+  return null;
+}
+
+/** Guide lines are recomputed on every pointermove but rarely actually change. */
+function sameLines(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
 /** Bounding rect of a clip in output coordinates at a timeline time (null when unknown). */
@@ -222,11 +255,6 @@ function PreviewOverlays({
   const currentTimeMs = useStore((s) => s.currentTimeMs);
   const resize = useRef<PreviewResize | null>(null);
 
-  const normPoint = (e: React.PointerEvent): { nx: number; ny: number } => {
-    const rect = stageRef.current!.getBoundingClientRect();
-    return { nx: (e.clientX - rect.left) / rect.width, ny: (e.clientY - rect.top) / rect.height };
-  };
-
   // A media clip visible right now that points at a disconnected source: the
   // canvas would otherwise just render black with no explanation. Plain scan
   // (no sort/alloc) since it runs every frame.
@@ -265,7 +293,8 @@ function PreviewOverlays({
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const state = useStore.getState();
     state.beginGesture();
-    const { nx, ny } = normPoint(e);
+    const stageRect = stageRef.current!.getBoundingClientRect();
+    const { nx, ny } = normPointIn(stageRect, e);
     const centerNx = (rect.dx + rect.dw / 2) / outW;
     const centerNy = (rect.dy + rect.dh / 2) / outH;
     resize.current = {
@@ -274,19 +303,20 @@ function PreviewOverlays({
       centerNx,
       centerNy,
       startDist: Math.max(0.01, Math.hypot(nx - centerNx, ny - centerNy)),
+      rect: stageRect,
     };
   };
 
   const onHandleMove = (e: React.PointerEvent) => {
     const r = resize.current;
     if (!r) return;
-    const { nx, ny } = normPoint(e);
+    const { nx, ny } = normPointIn(r.rect, e);
     const dist = Math.hypot(nx - r.centerNx, ny - r.centerNy);
     let scale = Math.min(8, Math.max(0.05, (r.origScale * dist) / r.startDist));
     // Magnetism: snap to the natural "fit-to-frame" scale (1.0) unless Shift is held.
     if (!e.shiftKey && Math.abs(scale - 1) < 0.03) scale = 1;
     const state = useStore.getState();
-    const clip = state.project.tracks.flatMap((tr) => tr.clips).find((c) => c.id === r.clipId);
+    const clip = findClip(state.project, r.clipId);
     if (!clip) return;
     const tf = clip.transform ?? DEFAULT_TRANSFORM;
     state.updateClip(r.clipId, { transform: { ...tf, scale } });
@@ -376,7 +406,8 @@ export function PreviewCanvas() {
     const timeMs = useStore.getState().currentTimeMs;
     const px = nx * outW;
     const py = ny * outH;
-    for (const track of [...project.tracks].reverse()) {
+    // Top lane paints last, so scan tracks top-down to hit the frontmost clip.
+    for (const track of project.tracks) {
       if (track.kind !== 'video' || track.hidden || (track.opacity ?? 1) <= 0) continue;
       const visible = clipsAt(track.clips, timeMs);
       for (let i = visible.length - 1; i >= 0; i--) {
@@ -390,16 +421,12 @@ export function PreviewCanvas() {
     return null;
   };
 
-  const normPoint = (e: React.PointerEvent): { nx: number; ny: number } => {
-    const rect = stageRef.current!.getBoundingClientRect();
-    return { nx: (e.clientX - rect.left) / rect.width, ny: (e.clientY - rect.top) / rect.height };
-  };
-
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     // The crop overlay owns the pointer while it is up.
     if (croppingClip) return;
-    const { nx, ny } = normPoint(e);
+    const rect = stageRef.current!.getBoundingClientRect();
+    const { nx, ny } = normPointIn(rect, e);
     const clip = hitTest(nx, ny);
     if (!clip) return;
     const state = useStore.getState();
@@ -407,17 +434,25 @@ export function PreviewCanvas() {
     state.beginGesture();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const t = clip.transform ?? DEFAULT_TRANSFORM;
-    drag.current = { clipId: clip.id, startNx: nx, startNy: ny, origX: t.x, origY: t.y, moved: false };
+    drag.current = {
+      clipId: clip.id,
+      startNx: nx,
+      startNy: ny,
+      origX: t.x,
+      origY: t.y,
+      moved: false,
+      rect,
+    };
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d) return;
-    const { nx, ny } = normPoint(e);
+    const { nx, ny } = normPointIn(d.rect, e);
     if (!d.moved && Math.abs(nx - d.startNx) < 0.004 && Math.abs(ny - d.startNy) < 0.004) return;
     d.moved = true;
     const state = useStore.getState();
-    const clip = state.project.tracks.flatMap((tr) => tr.clips).find((c) => c.id === d.clipId);
+    const clip = findClip(state.project, d.clipId);
     if (!clip) return;
     const tf = clip.transform ?? DEFAULT_TRANSFORM;
     let x = d.origX + (nx - d.startNx);
@@ -458,7 +493,12 @@ export function PreviewCanvas() {
         }
       }
     }
-    setGuides({ v: vLines, h: hLines });
+    // Returning the previous object bails React out: without this, every
+    // pointermove re-rendered the whole stage subtree to redraw guides that
+    // are almost always identical (and usually empty).
+    setGuides((prev) =>
+      sameLines(prev.v, vLines) && sameLines(prev.h, hLines) ? prev : { v: vLines, h: hLines },
+    );
 
     state.updateClip(d.clipId, {
       transform: {
@@ -473,7 +513,7 @@ export function PreviewCanvas() {
     if (!drag.current) return;
     useStore.getState().endGesture();
     drag.current = null;
-    setGuides({ v: [], h: [] });
+    setGuides((prev) => (prev.v.length === 0 && prev.h.length === 0 ? prev : { v: [], h: [] }));
   };
 
   // Wheel over the preview scales the selected clip. Native listener: React's

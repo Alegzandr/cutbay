@@ -602,7 +602,7 @@ export function createClipsSlice(
       // J/K/L → S → P flow works without ever touching the mouse.
       let targetId = selectedClipId;
       if (!targetId) {
-        for (const track of [...project.tracks].reverse()) {
+        for (const track of project.tracks) {
           if (track.kind !== 'video') continue;
           const hit = track.clips.find(
             (c) => currentTimeMs >= c.timelineStartMs && currentTimeMs < clipEndMs(c),

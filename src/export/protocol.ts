@@ -20,6 +20,14 @@ export interface ExportRequest {
   durationMs: number;
   /** Pre-rendered audio mix (OfflineAudioContext runs on the main thread only). */
   audio: { channels: Float32Array[]; sampleRate: number } | null;
+  /**
+   * Destination picked by the user, when the browser supports the File System
+   * Access API. The worker then muxes straight into the file instead of holding
+   * the whole output in memory: a 5 min 4K render is ~2 GB, which the buffered
+   * path had to allocate contiguously and then copy again into a Blob.
+   * Null on browsers without the API - the buffered path stays the fallback.
+   */
+  fileHandle: FileSystemFileHandle | null;
 }
 
 /**
@@ -31,7 +39,8 @@ export type ExportErrorCode = 'noAudibleAudio' | 'videoEncoderUnsupported';
 
 export type WorkerReply =
   | { type: 'progress'; value: number }
-  | { type: 'done'; buffer: ArrayBuffer; mime: string }
+  /** `buffer` is null when the output went straight to the user's file. */
+  | { type: 'done'; buffer: ArrayBuffer | null; mime: string }
   | { type: 'error'; code: ExportErrorCode }
   /** Anything the worker did not expect: not translatable, kept for diagnosis. */
   | { type: 'crash'; detail: string };

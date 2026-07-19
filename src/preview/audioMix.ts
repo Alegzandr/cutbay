@@ -137,6 +137,66 @@ function scheduleClip(
   return { source, gain, nodes };
 }
 
+/**
+ * Whether two project versions would schedule the exact same audio.
+ *
+ * The preview rebuilds its whole Web Audio graph whenever the project object
+ * changes. Dragging, scaling or cropping a clip in the preview calls
+ * `updateClip` on every pointermove, so during one drag that teardown ran ~60
+ * times a second, each time re-anchoring playback 30 ms into the future - an
+ * audible stutter for an edit that cannot affect the sound at all.
+ *
+ * Structural rather than a hash: the store is copy-on-write, so untouched
+ * tracks and clips compare by identity and a one-clip edit costs one pass over
+ * that clip's fields. Every field below is one that `scheduleProjectAudio` or
+ * `scheduleClip` reads - if a new field starts driving the mix, it has to be
+ * added here too, or the preview will stop following that edit.
+ */
+export function sameAudioMix(a: Project, b: Project): boolean {
+  if (a === b) return true;
+  if (a.tracks.length !== b.tracks.length) return false;
+  for (let i = 0; i < a.tracks.length; i++) {
+    const ta = a.tracks[i]!;
+    const tb = b.tracks[i]!;
+    if (ta === tb) continue;
+    if (
+      ta.id !== tb.id ||
+      ta.kind !== tb.kind ||
+      !!ta.muted !== !!tb.muted ||
+      (ta.volume ?? 1) !== (tb.volume ?? 1) ||
+      ta.clips.length !== tb.clips.length
+    ) {
+      return false;
+    }
+    for (let j = 0; j < ta.clips.length; j++) {
+      const ca = ta.clips[j]!;
+      const cb = tb.clips[j]!;
+      if (ca === cb) continue;
+      if (!sameAudioClip(ca, cb)) return false;
+    }
+  }
+  return true;
+}
+
+function sameAudioClip(a: Clip, b: Clip): boolean {
+  return (
+    a.id === b.id &&
+    a.kind === b.kind &&
+    a.assetId === b.assetId &&
+    a.audioTrackIndex === b.audioTrackIndex &&
+    a.linkId === b.linkId &&
+    a.volume === b.volume &&
+    a.timelineStartMs === b.timelineStartMs &&
+    a.sourceInMs === b.sourceInMs &&
+    a.sourceOutMs === b.sourceOutMs &&
+    a.speed === b.speed &&
+    a.fadeInMs === b.fadeInMs &&
+    a.fadeOutMs === b.fadeOutMs &&
+    (a.pan ?? 0) === (b.pan ?? 0) &&
+    !!a.mono === !!b.mono
+  );
+}
+
 export function stopScheduled(scheduled: ScheduledSource[]): void {
   for (const { source, nodes } of scheduled) {
     try {
