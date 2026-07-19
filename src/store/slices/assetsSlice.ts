@@ -69,7 +69,8 @@ export function createAssetsSlice(
       const assets = { ...get().assets };
       delete assets[assetId];
       set({ assets });
-      disposeAssetResources(assetId);
+      // No dispose here: the removal is undoable, and the history now holds the
+      // asset - freeing its decoder would make the restored card unplayable.
       pruneSelection();
     },
 

@@ -33,6 +33,16 @@ export interface ContextMenuState {
   target: ContextTarget;
 }
 
+/**
+ * One undo step. The media library is part of it: an import adds an asset AND
+ * a clip, so an undo that rolled back only the project would leave an orphan
+ * card behind in the library.
+ */
+export interface HistoryEntry {
+  project: Project;
+  assets: Record<string, MediaAsset>;
+}
+
 export interface EditorState {
   project: Project;
   assets: Record<string, MediaAsset>;
@@ -85,9 +95,9 @@ export interface EditorState {
   importing: boolean;
   error: string | null;
 
-  past: Project[];
-  future: Project[];
-  gestureSnapshot: Project | null;
+  past: HistoryEntry[];
+  future: HistoryEntry[];
+  gestureSnapshot: HistoryEntry | null;
 
   setAspectRatio: (a: AspectRatio) => void;
   addAsset: (asset: MediaAsset) => void;

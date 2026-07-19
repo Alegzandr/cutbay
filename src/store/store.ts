@@ -67,9 +67,15 @@ export const useStore = create<EditorState>((set, get) => {
       mutated,
       priorityClipId !== undefined ? priorityClipId : get().selectedClipId,
     );
+    // Inside a gesture the whole sequence is one undo step: endGesture pushes
+    // the entry taken at beginGesture, so nested edits must not push their own.
+    if (get().gestureSnapshot) {
+      set({ project: next });
+      return;
+    }
     set({
       project: next,
-      past: [...get().past, prev].slice(-HISTORY_LIMIT),
+      past: [...get().past, { project: prev, assets: get().assets }].slice(-HISTORY_LIMIT),
       future: [],
     });
   };

@@ -1,6 +1,7 @@
 import type { StoreSet, StoreGet, SliceHelpers } from '../sliceHelpers';
 import type { EditorState } from '../editorState';
 import { resolveOverlaps } from '../projectOps';
+import { disposeUnreachableAssets, reviveAssets } from '../assetLifecycle';
 import { HISTORY_LIMIT } from '../constants';
 
 export function createHistorySlice(
@@ -9,11 +10,16 @@ export function createHistorySlice(
   _helpers: SliceHelpers,
 ): Pick<EditorState, 'beginGesture' | 'endGesture' | 'cancelGesture' | 'undo' | 'redo'> {
   return {
-    beginGesture: () => set({ gestureSnapshot: get().project }),
+    beginGesture: () => set({ gestureSnapshot: { project: get().project, assets: get().assets } }),
 
     cancelGesture: () => {
       const snap = get().gestureSnapshot;
-      if (snap) set({ project: snap, gestureSnapshot: null });
+      if (snap)
+        set({
+          project: snap.project,
+          assets: reviveAssets(snap.assets, get().assets),
+          gestureSnapshot: null,
+        });
     },
 
     endGesture: () => {
@@ -21,8 +27,11 @@ export function createHistorySlice(
       // legal pairwise overlaps are kept - they are crossfades.
       const settled = resolveOverlaps(get().project, get().selectedClipId);
       if (settled !== get().project) set({ project: settled });
-      const { gestureSnapshot, project, past } = get();
-      if (gestureSnapshot && gestureSnapshot !== project) {
+      const { gestureSnapshot, project, assets, past } = get();
+      if (
+        gestureSnapshot &&
+        (gestureSnapshot.project !== project || gestureSnapshot.assets !== assets)
+      ) {
         set({
           past: [...past, gestureSnapshot].slice(-HISTORY_LIMIT),
           future: [],
@@ -34,31 +43,35 @@ export function createHistorySlice(
     },
 
     undo: () => {
-      const { past, future, project } = get();
+      const { past, future, project, assets } = get();
       if (past.length === 0) return;
-      const prev = past[past.length - 1];
+      const prev = past[past.length - 1]!;
       set({
-        project: prev,
+        project: prev.project,
+        assets: reviveAssets(prev.assets, assets),
         past: past.slice(0, -1),
-        future: [project, ...future],
+        future: [{ project, assets }, ...future],
         selectedClipId: null,
         selectedClipIds: [],
         inspectorOpen: false,
       });
+      disposeUnreachableAssets(Object.keys(assets), get());
     },
 
     redo: () => {
-      const { past, future, project } = get();
+      const { past, future, project, assets } = get();
       if (future.length === 0) return;
-      const next = future[0];
+      const next = future[0]!;
       set({
-        project: next,
-        past: [...past, project].slice(-HISTORY_LIMIT),
+        project: next.project,
+        assets: reviveAssets(next.assets, assets),
+        past: [...past, { project, assets }].slice(-HISTORY_LIMIT),
         future: future.slice(1),
         selectedClipId: null,
         selectedClipIds: [],
         inspectorOpen: false,
       });
+      disposeUnreachableAssets(Object.keys(assets), get());
     },
   };
 }

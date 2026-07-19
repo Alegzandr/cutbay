@@ -30,7 +30,11 @@ export function createProjectSlice(
     },
 
     resetProject: () => {
-      for (const id of Object.keys(get().assets)) disposeAssetResources(id);
+      // Includes assets only the history still reaches - nothing survives a reset.
+      const ids = new Set(Object.keys(get().assets));
+      for (const entry of [...get().past, ...get().future])
+        for (const id of Object.keys(entry.assets)) ids.add(id);
+      for (const id of ids) disposeAssetResources(id);
       set({
         project: createEmptyProject(),
         assets: {},

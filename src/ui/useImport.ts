@@ -11,8 +11,15 @@ import { t } from '../i18n';
  */
 export function useImport(): (files: Iterable<File>) => Promise<void> {
   return useCallback(async (files: Iterable<File>) => {
-    const { setImporting, setError, addAsset, addClipFromAsset, addSubtitleClips } =
-      useStore.getState();
+    const {
+      setImporting,
+      setError,
+      addAsset,
+      addClipFromAsset,
+      addSubtitleClips,
+      beginGesture,
+      endGesture,
+    } = useStore.getState();
     // Materialize now: a FileList is LIVE, and callers reset their input
     // (value = '') right after calling us - awaiting first would empty it.
     const list = [...files];
@@ -32,8 +39,16 @@ export function useImport(): (files: Iterable<File>) => Promise<void> {
             continue;
           }
           const { asset, warning } = await probeFile(file);
-          addAsset(asset);
-          addClipFromAsset(asset.id);
+          // Library entry + timeline clips are one undo step: a Ctrl+Z right
+          // after an import takes the whole file back out, card included.
+          beginGesture();
+          try {
+            addAsset(asset);
+            addClipFromAsset(asset.id);
+          } finally {
+            // An open gesture swallows every later edit's history entry.
+            endGesture();
+          }
           // Peaks and the full thumbnail strip arrive in the background.
           ensureAssetVisuals(asset, useStore.getState());
           // Partial import (e.g. undecodable video codec, audio kept): the
