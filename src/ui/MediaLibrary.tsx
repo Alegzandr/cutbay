@@ -152,11 +152,14 @@ export function reconnectAssetViaPicker(assetId: string): void {
 }
 
 /**
- * One row per audio track the browser cannot decode, offering to transcode it.
+ * One row per audio track the browser cannot decode natively, offering to
+ * convert it.
  *
- * Deliberately explicit about the cost: the first activation pulls a 32 MB
- * converter and then chews through the whole file, which is long enough that an
- * unexplained spinner would read as a freeze.
+ * Presented as an available option, not a defect: the app can play these tracks,
+ * it just has to do the work first. Hence the sky tone shared with the other
+ * actions rather than the amber the card reserves for a genuinely broken asset
+ * (a disconnected file). What does need saying up front is the cost, since the
+ * first conversion pulls a 32 MB converter and then reads the whole file.
  */
 function UndecodableAudio({ asset }: { asset: MediaAsset }) {
   const { t } = useTranslation();
@@ -165,43 +168,69 @@ function UndecodableAudio({ asset }: { asset: MediaAsset }) {
   if (pending.length === 0 || asset.disconnected) return null;
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950/60 px-1 py-1">
+    <div className="space-y-1 border-t border-zinc-800 bg-zinc-950/60 px-1 py-1">
       {pending.map((track) => {
         const key = audioKey(asset.id, track.index);
         const progress = transcodes[key];
-        const running = progress != null;
         const name =
           track.label ??
           track.language ??
           t('library.audio.trackNumber', { n: track.index + 1 });
+
+        if (progress) {
+          const percent = progress.ratio == null ? null : Math.round(progress.ratio * 100);
+          return (
+            <div key={track.index}>
+              <div className="flex items-center gap-1">
+                <span className="min-w-0 flex-1 truncate text-[9px] text-sky-300/90">
+                  {t(`library.audio.phase.${progress.phase}`)}
+                  {percent != null && ` · ${percent} %`}
+                </span>
+                <button
+                  className="touch-hit flex-none rounded px-1 py-0.5 text-[9px] text-zinc-400 active:bg-zinc-800 pointer-coarse:p-2"
+                  onClick={() => useStore.getState().cancelTranscode(asset.id, track.index)}
+                >
+                  {t('library.audio.cancel')}
+                </button>
+              </div>
+              {/* An unmeasurable phase (decoding) gets a full dim bar rather
+                  than an empty one: the job is nearly done, not stalled. */}
+              <div
+                className="mt-0.5 h-0.5 w-full overflow-hidden rounded-full bg-zinc-800"
+                role="progressbar"
+                aria-valuenow={percent ?? undefined}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={t(`library.audio.phase.${progress.phase}`)}
+              >
+                <div
+                  className={`h-full rounded-full transition-[width] duration-300 ${
+                    percent == null ? 'w-full bg-sky-500/40' : 'bg-sky-400'
+                  }`}
+                  style={percent == null ? undefined : { width: `${percent}%` }}
+                />
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div key={track.index} className="flex items-center gap-1">
             <span
-              className="min-w-0 flex-1 truncate text-[9px] text-amber-300/90"
+              className="min-w-0 flex-1 truncate text-[9px] text-zinc-400"
               title={t('library.audio.needsTranscode', { codec: track.codec ?? '?' })}
             >
-              {running
-                ? t('library.audio.converting', { percent: Math.round(progress * 100) })
-                : `${name} · ${track.codec ?? '?'}`}
+              {`${name} · ${track.codec ?? '?'}`}
             </span>
-            {running ? (
+            <Tooltip label={t('library.audio.activateHint')}>
               <button
-                className="touch-hit flex-none rounded px-1 py-0.5 text-[9px] text-zinc-400 active:bg-zinc-800 pointer-coarse:p-2"
-                onClick={() => useStore.getState().cancelTranscode(asset.id, track.index)}
+                className="touch-hit flex-none rounded bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-medium text-sky-300 hover:bg-sky-500/25 active:bg-sky-500/30 pointer-coarse:p-2"
+                onClick={() => void useStore.getState().transcodeAudioTrack(asset.id, track.index)}
               >
-                {t('library.audio.cancel')}
+                <AudioLines className="mr-0.5 inline h-3 w-3" />
+                {t('library.audio.activate')}
               </button>
-            ) : (
-              <Tooltip label={t('library.audio.activateHint')}>
-                <button
-                  className="touch-hit flex-none rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-300 active:bg-amber-500/30 pointer-coarse:p-2"
-                  onClick={() => void useStore.getState().transcodeAudioTrack(asset.id, track.index)}
-                >
-                  <AudioLines className="mr-0.5 inline h-3 w-3" />
-                  {t('library.audio.activate')}
-                </button>
-              </Tooltip>
-            )}
+            </Tooltip>
           </div>
         );
       })}

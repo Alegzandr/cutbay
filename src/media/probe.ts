@@ -80,12 +80,18 @@ async function probeFrameRate(
 }
 
 /**
- * Result of probing a file: the asset, plus an optional non-fatal warning to
- * surface (e.g. the video codec is not decodable but the audio was kept).
+ * Result of probing a file: the asset, plus what to tell the user about it.
+ *
+ * The two channels are deliberately separate. A `warning` is a degradation, so
+ * something the file carries did not make it in. A `notice` is the opposite: the
+ * import went fine and there is simply more available on request. Advanced audio
+ * codecs belong in the second, since the app can in fact play them - reporting
+ * them in red would claim a failure where there is a capability.
  */
 export interface ProbeResult {
   asset: MediaAsset;
   warning?: string;
+  notice?: string;
 }
 
 /**
@@ -163,21 +169,19 @@ export async function probeFile(file: File, reuseId?: string): Promise<ProbeResu
   }
 
   warmAudio(asset);
-  // Both halves of the file can degrade independently, so report both.
-  const warnings: string[] = [];
-  if (videoTrack && !videoDecodable) {
-    warnings.push(
-      t('errors.media.videoAudioOnly', { name: file.name, codec: videoTrack.codec ?? '?' }),
-    );
-  }
-  if (skippedCodecs.length > 0) {
-    // The track is listed, just not playable yet: point at the way out rather
-    // than reporting a dead end.
-    warnings.push(
-      t('errors.media.audioNeedsTranscode', { name: file.name, codec: skippedCodecs.join(', ') }),
-    );
-  }
-  return { asset, warning: warnings.length > 0 ? warnings.join('\n') : undefined };
+  return {
+    asset,
+    warning:
+      videoTrack && !videoDecodable
+        ? t('errors.media.videoAudioOnly', { name: file.name, codec: videoTrack.codec ?? '?' })
+        : undefined,
+    // Not a problem to report: the track is there and one click away. The card
+    // in the library carries the actual button, so this only points at it.
+    notice:
+      skippedCodecs.length > 0
+        ? t('library.audio.detected', { codec: skippedCodecs.join(', ') })
+        : undefined,
+  };
 }
 
 /**

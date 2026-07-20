@@ -2,7 +2,11 @@ import type { StoreSet, StoreGet, SliceHelpers } from '../sliceHelpers';
 import type { EditorState } from '../editorState';
 import { audioKey, disposeAssetResources, setTranscodedAudio } from '../../media/mediaCache';
 import { ensureAssetVisuals, probeFile } from '../../media/probe';
-import { TranscodeCanceled, transcodeAudioTrack } from '../../media/transcodeAudio';
+import {
+  TranscodeCanceled,
+  transcodeAudioTrack,
+  type TranscodeProgress,
+} from '../../media/transcodeAudio';
 import { t } from '../../i18n';
 
 /**
@@ -12,8 +16,13 @@ import { t } from '../../i18n';
  */
 const controllers = new Map<string, AbortController>();
 
-function setProgress(set: StoreSet, get: StoreGet, key: string, ratio: number): void {
-  set({ transcodes: { ...get().transcodes, [key]: ratio } });
+function setProgress(
+  set: StoreSet,
+  get: StoreGet,
+  key: string,
+  progress: TranscodeProgress,
+): void {
+  set({ transcodes: { ...get().transcodes, [key]: progress } });
 }
 
 function clearProgress(set: StoreSet, get: StoreGet, key: string): void {
@@ -46,7 +55,7 @@ export function createAssetsSlice(
       try {
         // Reuse the id so the asset's clips stay linked; probe re-registers the
         // decoder input (disposing the stale one) under the same id.
-        const { asset: probed, warning } = await probeFile(file, assetId);
+        const { asset: probed, warning, notice } = await probeFile(file, assetId);
         // The asset may have been removed while the OS file dialog was open.
         if (!get().assets[assetId]) {
           disposeAssetResources(assetId);
@@ -106,7 +115,9 @@ export function createAssetsSlice(
           });
         }
         ensureAssetVisuals(probed, get());
+        // A degradation outranks an offer: both slots are the same toast.
         if (warning) get().setError(warning);
+        else if (notice) get().setNotice(notice);
       } catch (err) {
         get().setError(
           err instanceof Error
@@ -157,11 +168,11 @@ export function createAssetsSlice(
 
       const controller = new AbortController();
       controllers.set(key, controller);
-      setProgress(set, get, key, 0);
+      setProgress(set, get, key, { phase: 'downloading', ratio: 0 });
       try {
         const buffer = await transcodeAudioTrack(asset, audioTrackIndex, {
           signal: controller.signal,
-          onProgress: (ratio) => setProgress(set, get, key, ratio),
+          onProgress: (progress) => setProgress(set, get, key, progress),
         });
         // The asset can have been removed (or the file reconnected) during a
         // job that runs for minutes: committing then would resurrect it.
@@ -184,6 +195,8 @@ export function createAssetsSlice(
         // A clip already sitting on the timeline gains the lane it could not
         // have at drop time.
         get().attachAudioTrack(assetId, audioTrackIndex);
+        // Long enough that the user has almost certainly looked away: say so.
+        get().setNotice(t('library.audio.ready', { name: asset.file.name }));
       } catch (err) {
         if (!(err instanceof TranscodeCanceled)) {
           get().setError(

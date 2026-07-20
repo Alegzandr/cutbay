@@ -55,11 +55,15 @@ function injectCsp(): Plugin {
  * it never weighs on a normal page load.
  */
 function copyFFmpegCore(): Plugin {
-  // The package exports no './package.json', so locate it through its UMD entry
-  // (what ffmpeg.wasm's classic worker importScripts) and take the sibling wasm.
-  const umdDir = path.dirname(require.resolve('@ffmpeg/core'));
+  // The ESM build, not the UMD one. ffmpeg.wasm spawns its worker with
+  // `type: 'module'`, where importScripts() does not exist: its loader falls back
+  // to `import(coreURL)` and reads `.default`, which a UMD bundle does not have.
+  // Pointing at UMD makes load() fail with "failed to import ffmpeg-core.js".
+  // require.resolve picks the "require" condition (UMD), so cross over by hand;
+  // the package exports no './package.json' to resolve against directly.
+  const coreDir = path.join(path.dirname(require.resolve('@ffmpeg/core')), '..', 'esm');
   const files = ['ffmpeg-core.js', 'ffmpeg-core.wasm'];
-  const sourceOf = (name: string) => path.join(umdDir, name);
+  const sourceOf = (name: string) => path.join(coreDir, name);
   return {
     name: 'copy-ffmpeg-core',
     // Dev has no dist to copy into: hand the files straight off disk instead.
@@ -73,6 +77,14 @@ function copyFFmpegCore(): Plugin {
         );
         fs.createReadStream(sourceOf(name)).pipe(res);
       });
+    },
+    buildStart() {
+      // Fail the build rather than ship a dist whose /ffmpeg/ 404s at runtime.
+      for (const name of files) {
+        if (!fs.existsSync(sourceOf(name))) {
+          this.error(`@ffmpeg/core is missing ${name} at ${coreDir}. Run npm install.`);
+        }
+      }
     },
     async writeBundle(options) {
       const outDir = options.dir ?? 'dist';
@@ -96,6 +108,12 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), injectCsp(), copyFFmpegCore()],
   worker: {
     format: 'es',
+  },
+  optimizeDeps: {
+    // ffmpeg.wasm locates its worker with `new URL('./worker.js', import.meta.url)`.
+    // Dep pre-bundling flattens the package into a single chunk, so that URL points
+    // at a file that no longer exists and the worker 404s (dev only, silently).
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
   },
   build: {
     target: 'es2022',

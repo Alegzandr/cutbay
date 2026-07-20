@@ -11,6 +11,7 @@ import type { TimeFormat } from '../lib/time';
 import type { PreviewResolutionMode } from '../app/config';
 import type { PreviewTool, PreviewView } from '../preview/view';
 import type { SubtitleCue } from '../lib/subtitles';
+import type { TranscodeProgress } from '../media/transcodeAudio';
 
 /** Panes of the inspector column. */
 export type InspectorTab = 'clip' | 'subtitles';
@@ -159,11 +160,11 @@ export interface EditorState {
   exportOpen: boolean;
   importing: boolean;
   /**
-   * Running audio transcodes, keyed by `audioKey(assetId, trackIndex)`, holding
-   * a 0..1 progress ratio. An entry exists only while the job runs, so the UI
-   * reads presence as "in progress".
+   * Running audio conversions, keyed by `audioKey(assetId, trackIndex)`, holding
+   * the current phase and its progress. An entry exists only while the job runs,
+   * so the UI reads presence as "in progress".
    */
-  transcodes: Record<string, number>;
+  transcodes: Record<string, TranscodeProgress>;
   error: string | null;
   /** Transient confirmation ("Project saved"), shown in the same slot as `error`. */
   notice: string | null;

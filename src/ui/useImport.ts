@@ -25,6 +25,7 @@ export function useImport(): (files: Iterable<File>, opts?: ImportOptions) => Pr
     const {
       setImporting,
       setError,
+      setNotice,
       addAsset,
       addClipFromAsset,
       addSubtitleClips,
@@ -35,9 +36,13 @@ export function useImport(): (files: Iterable<File>, opts?: ImportOptions) => Pr
     // (value = '') right after calling us - awaiting first would empty it.
     const list = [...files];
     setImporting(true);
-    // Collect failures and report them once: successive setError calls replace
-    // the toast, so a per-file report would only ever show the last failure.
+    // Collect everything and report once at the end: the toast is a single slot,
+    // so per-file calls would only ever leave the last one standing. The three
+    // lists are ranked, not merged - a batch that lost something says so, and an
+    // informational notice never gets to hide a failure.
     const failures: string[] = [];
+    const warnings: string[] = [];
+    const notices: string[] = [];
     try {
       for (const file of list) {
         try {
@@ -48,7 +53,7 @@ export function useImport(): (files: Iterable<File>, opts?: ImportOptions) => Pr
             addSubtitleClips(cues);
             continue;
           }
-          const { asset, warning } = await probeFile(file);
+          const { asset, warning, notice } = await probeFile(file);
           // Library entry + timeline clips are one undo step: a Ctrl+Z right
           // after an import takes the whole file back out, card included.
           beginGesture();
@@ -63,7 +68,9 @@ export function useImport(): (files: Iterable<File>, opts?: ImportOptions) => Pr
           ensureAssetVisuals(asset, useStore.getState());
           // Partial import (e.g. undecodable video codec, audio kept): the
           // file landed, but the user must know what was left out.
-          if (warning) setError(warning);
+          if (warning) warnings.push(warning);
+          // Nothing missing, just something extra on offer (advanced audio).
+          if (notice) notices.push(notice);
         } catch (err) {
           failures.push(
             err instanceof Error
@@ -74,7 +81,9 @@ export function useImport(): (files: Iterable<File>, opts?: ImportOptions) => Pr
       }
     } finally {
       setImporting(false);
-      if (failures.length > 0) setError(failures.join('\n'));
+      const problems = [...failures, ...warnings];
+      if (problems.length > 0) setError(problems.join('\n'));
+      else if (notices.length > 0) setNotice([...new Set(notices)].join('\n'));
     }
   }, []);
 }
