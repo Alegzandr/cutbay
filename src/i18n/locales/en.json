@@ -403,5 +403,22 @@
   "menu.file.importSubtitles.hint": "SRT, WebVTT or ASS/SSA : one clip per cue",
   "menu.view.subtitles": "Subtitle list",
   "volume.entry.label": "Volume in decibels",
-  "volume.entry.hint": "Enter to apply · {{min}} dB = silence"
+  "volume.entry.hint": "Enter to apply · {{min}} dB = silence",
+  "a11y.timeline.label": "Timeline tracks",
+  "a11y.track.video": "Video track {{n}}",
+  "a11y.track.audio": "Audio track {{n}}",
+  "a11y.track.state.muted": "muted",
+  "a11y.track.state.hidden": "hidden",
+  "a11y.track.state.locked": "locked",
+  "a11y.track.volume": "Track volume",
+  "a11y.track.opacity": "Track opacity",
+  "a11y.clip.label": "{{name}}, {{start}} to {{end}}, track {{track}}",
+  "a11y.announce.play": "Playing",
+  "a11y.announce.pause": "Paused",
+  "a11y.announce.split_one": "Clip split",
+  "a11y.announce.split_other": "{{count}} clips split",
+  "a11y.announce.deleted_one": "Clip deleted",
+  "a11y.announce.deleted_other": "{{count}} clips deleted",
+  "a11y.announce.undo": "Undone",
+  "a11y.announce.redo": "Redone"
 }

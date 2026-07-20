@@ -333,6 +333,10 @@ export function Timeline() {
           <MarkerBar pxPerMs={pxPerMs} />
           <Ruler durationMs={durationMs} pxPerMs={pxPerMs} overscanMs={coarse ? 0 : 30_000} />
           <div
+            // One list item per track, each holding its clips as focusable
+            // buttons: a screen reader walks the timeline track by track.
+            role="list"
+            aria-label={t('a11y.timeline.label')}
             onPointerDown={onBgPointerDown}
             onPointerMove={onBgPointerMove}
             onPointerUp={onBgPointerUp}
@@ -344,8 +348,8 @@ export function Timeline() {
               useStore.getState().openContextMenu(e.clientX, e.clientY, { kind: 'timeline' });
             }}
           >
-            {project.tracks.map((track) => (
-              <TrackRow key={track.id} track={track} pxPerMs={pxPerMs} />
+            {project.tracks.map((track, i) => (
+              <TrackRow key={track.id} track={track} index={i} pxPerMs={pxPerMs} />
             ))}
           </div>
           {/* Region shading + marker lines: after the tracks, so they paint over the clips. */}

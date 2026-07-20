@@ -24,6 +24,7 @@ import { ShortcutsHelp } from './ui/ShortcutsHelp';
 import { Preferences } from './ui/Preferences';
 import { About } from './ui/About';
 import { ContextMenu } from './ui/menu/ContextMenu';
+import { A11yAnnouncer } from './ui/A11yAnnouncer';
 import { useEditorHotkeys } from './ui/useEditorHotkeys';
 import { useIsCoarsePointer } from './lib/device';
 
@@ -138,6 +139,7 @@ export default function App() {
       <About />
       {!coarse && <ContextMenu />}
       <Toast />
+      <A11yAnnouncer />
 
       <AnimatePresence>
         {dragging && (

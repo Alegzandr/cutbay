@@ -2,6 +2,7 @@ import type { StoreSet, StoreGet, SliceHelpers } from '../sliceHelpers';
 import type { EditorState } from '../editorState';
 import { resolveOverlaps } from '../projectOps';
 import { disposeUnreachableAssets, reviveAssets } from '../assetLifecycle';
+import { announce } from '../../lib/a11yBus';
 import { HISTORY_LIMIT } from '../constants';
 
 export function createHistorySlice(
@@ -56,6 +57,7 @@ export function createHistorySlice(
         inspectorOpen: false,
       });
       disposeUnreachableAssets(Object.keys(assets), get());
+      announce('a11y.announce.undo');
     },
 
     redo: () => {
@@ -72,6 +74,7 @@ export function createHistorySlice(
         inspectorOpen: false,
       });
       disposeUnreachableAssets(Object.keys(assets), get());
+      announce('a11y.announce.redo');
     },
   };
 }

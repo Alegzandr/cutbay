@@ -230,6 +230,7 @@ export function Transport() {
       <Tooltip label={t('transport.loop')}>
         <button
           className={`touch-hit rounded-lg p-2 ${loopEnabled ? 'bg-amber-500/20 text-amber-300' : 'text-zinc-400'} active:bg-zinc-800`}
+          aria-pressed={loopEnabled}
           onClick={toggleLoopEnabled}
         >
           <Repeat className="h-4 w-4" />

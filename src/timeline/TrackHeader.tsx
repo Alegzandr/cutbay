@@ -71,7 +71,15 @@ export const TrackHeader = memo(function TrackHeader({ track }: Props) {
                 already colour-coded by kind, so that icon only repeated what
                 the row itself says, while locking had nowhere to live. */}
             <Tooltip label={t(track.locked ? 'track.unlock' : 'track.lock')}>
-              <button className={btn} onClick={() => toggleTrackLocked(track.id)}>
+              {/* Stable name + aria-pressed: the tooltip flips with the action
+                  ("Unlock track") but a toggle reads better as one name whose
+                  pressed state carries the on/off - same for mute and hide. */}
+              <button
+                className={btn}
+                aria-label={t('track.lock')}
+                aria-pressed={!!track.locked}
+                onClick={() => toggleTrackLocked(track.id)}
+              >
                 {track.locked ? (
                   <Lock className="h-3 w-3 text-amber-400" />
                 ) : (
@@ -89,7 +97,12 @@ export const TrackHeader = memo(function TrackHeader({ track }: Props) {
             {/* The tooltip names the action, not the state: the icon already
                 shows the state, and "Mute track" on a muted track is a lie. */}
             <Tooltip label={t(track.muted ? 'track.unmute' : 'track.mute')}>
-              <button className={btn} onClick={() => toggleTrackMuted(track.id)}>
+              <button
+                className={btn}
+                aria-label={t('track.mute')}
+                aria-pressed={!!track.muted}
+                onClick={() => toggleTrackMuted(track.id)}
+              >
                 {track.muted ? (
                   <VolumeX className="h-3 w-3 text-red-400" />
                 ) : (
@@ -99,7 +112,12 @@ export const TrackHeader = memo(function TrackHeader({ track }: Props) {
             </Tooltip>
             {track.kind === 'video' ? (
               <Tooltip label={t(track.hidden ? 'track.show' : 'track.hide')}>
-                <button className={btn} onClick={() => toggleTrackHidden(track.id)}>
+                <button
+                  className={btn}
+                  aria-label={t('track.hide')}
+                  aria-pressed={!!track.hidden}
+                  onClick={() => toggleTrackHidden(track.id)}
+                >
                   {track.hidden ? <EyeOff className="h-3 w-3 text-red-400" /> : <Eye className="h-3 w-3" />}
                 </button>
               </Tooltip>
@@ -133,6 +151,10 @@ export const TrackHeader = memo(function TrackHeader({ track }: Props) {
                 value={gainToFader(track.volume ?? 1)}
                 className={`${slider} ${track.kind === 'video' ? 'text-sky-500' : 'text-emerald-500'}`}
                 title={t('track.volume', { db: gainDb(track.volume ?? 1) })}
+                aria-label={t('a11y.track.volume')}
+                // The range's raw value is a fader position (0..1): meaningless
+                // read aloud, so speak the dB figure the badge shows instead.
+                aria-valuetext={gainDb(track.volume ?? 1)}
                 onPointerDown={() => {
                   const r = volumeRef.current?.getBoundingClientRect();
                   if (r) setBadgeAt({ left: r.left + r.width / 2, top: r.top - 6 });
@@ -171,6 +193,8 @@ export const TrackHeader = memo(function TrackHeader({ track }: Props) {
                 value={track.opacity ?? 1}
                 className={`${slider} text-zinc-400`}
                 title={t('track.opacity', { pct: Math.round((track.opacity ?? 1) * 100) })}
+                aria-label={t('a11y.track.opacity')}
+                aria-valuetext={`${Math.round((track.opacity ?? 1) * 100)}%`}
                 onPointerDown={beginGesture}
                 onPointerUp={endGesture}
                 onChange={(e) => updateTrack(track.id, { opacity: Number(e.target.value) })}

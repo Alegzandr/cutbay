@@ -403,5 +403,22 @@
   "menu.file.importSubtitles.hint": "SRT, WebVTT ou ASS/SSA : um clipe por fala",
   "menu.view.subtitles": "Lista de legendas",
   "volume.entry.label": "Volume em decibéis",
-  "volume.entry.hint": "Enter para aplicar · {{min}} dB = silêncio"
+  "volume.entry.hint": "Enter para aplicar · {{min}} dB = silêncio",
+  "a11y.timeline.label": "Faixas da linha do tempo",
+  "a11y.track.video": "Faixa de vídeo {{n}}",
+  "a11y.track.audio": "Faixa de áudio {{n}}",
+  "a11y.track.state.muted": "silenciada",
+  "a11y.track.state.hidden": "oculta",
+  "a11y.track.state.locked": "bloqueada",
+  "a11y.track.volume": "Volume da faixa",
+  "a11y.track.opacity": "Opacidade da faixa",
+  "a11y.clip.label": "{{name}}, de {{start}} a {{end}}, faixa {{track}}",
+  "a11y.announce.play": "Reproduzindo",
+  "a11y.announce.pause": "Pausado",
+  "a11y.announce.split_one": "Clipe dividido",
+  "a11y.announce.split_other": "{{count}} clipes divididos",
+  "a11y.announce.deleted_one": "Clipe excluído",
+  "a11y.announce.deleted_other": "{{count}} clipes excluídos",
+  "a11y.announce.undo": "Desfeito",
+  "a11y.announce.redo": "Refeito"
 }

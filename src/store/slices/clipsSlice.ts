@@ -20,6 +20,7 @@ import {
   withLinkedIds,
 } from '../projectOps';
 import { clamp } from '../../lib/time';
+import { announce } from '../../lib/a11yBus';
 import { MIN_CLIP_DURATION_MS } from '../../app/config';
 import type { SubtitleVAlign } from '../../lib/subtitles';
 
@@ -538,6 +539,7 @@ export function createClipsSlice(
           track.clips.push(...additions);
         }
       });
+      announce('a11y.announce.split', { count: targetSet.size });
     },
 
     deleteClip: (clipId) => get().deleteClips([clipId], false),
@@ -567,6 +569,7 @@ export function createClipsSlice(
         }
       });
       pruneSelection();
+      announce('a11y.announce.deleted', { count: targets.length });
     },
 
     duplicateClips: (clipIds) => {

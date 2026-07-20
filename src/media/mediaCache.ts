@@ -2,7 +2,6 @@ import {
   Input,
   ALL_FORMATS,
   BlobSource,
-  VideoSampleSink,
   AudioBufferSink,
   InputAudioTrack,
 } from 'mediabunny';
@@ -81,14 +80,6 @@ export function getStillFrame(asset: MediaAsset): Promise<StillFrame | null> {
     stillPromises.set(asset.id, promise);
   }
   return promise;
-}
-
-/** Create a dedicated video sink (one per playback cursor, for independent iteration). */
-export async function createVideoSink(asset: MediaAsset): Promise<VideoSampleSink | null> {
-  const input = getInput(asset);
-  const track = await input.getPrimaryVideoTrack();
-  if (!track || !(await track.canDecode())) return null;
-  return new VideoSampleSink(track);
 }
 
 /**
