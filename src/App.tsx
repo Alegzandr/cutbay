@@ -79,6 +79,18 @@ export default function App() {
     void initPersistence();
   }, []);
 
+  // The editor ships its own right-click menu, so the native one is suppressed
+  // everywhere except text fields, where copy/paste/spellcheck stays useful.
+  useEffect(() => {
+    const onContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+      e.preventDefault();
+    };
+    document.addEventListener('contextmenu', onContextMenu);
+    return () => document.removeEventListener('contextmenu', onContextMenu);
+  }, []);
+
   if (!supported) return <UnsupportedScreen />;
 
   return (
