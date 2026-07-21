@@ -20,21 +20,37 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
 /**
- * Only the document is rewritten. COOP and COEP are document-level policies -
- * they do nothing on a subresource - and under `require-corp` a same-origin
- * subresource is allowed without CORP, which every file this app loads is.
+ * Documents and worker scripts, and nothing else.
  *
- * So subresources are left alone entirely, not even re-fetched. That is not a
- * micro-optimization: proxying means piping the response through
- * `new Response(response.body, ...)`, and the ffmpeg core is a 32 MB stream. The
- * browser is free to kill an idle service worker while such a stream is still
- * open, and when it does the fetch rejects as a bare "Failed to fetch" - a
- * download that worked before this worker existed, broken by the worker meant to
- * make it faster.
+ * Documents for the obvious reason. Worker scripts because a dedicated worker
+ * owned by a require-corp document is REFUSED unless its own response carries
+ * the same policy: an absent header means "unsafe-none", which is incompatible,
+ * and the worker fails to start with an ErrorEvent carrying no message. That is
+ * how this was found - the page was isolated, so the runtime picked the
+ * multi-threaded core, and the core then sat for ever inside a worker that had
+ * never come up.
+ *
+ * Everything else is left alone, not even re-fetched. Under require-corp a
+ * same-origin subresource is already allowed without CORP, and every file this
+ * app loads is same-origin - so proxying them buys nothing and costs plenty:
+ * it pipes each response through `new Response(response.body, ...)`, and the
+ * ffmpeg core is a 32 MB stream to hold open across a worker the browser may
+ * decide to kill mid-flight.
  */
+const WORKER_DESTINATIONS = new Set(['worker', 'sharedworker']);
+
+/** The editor. Registration takes root scope, so the landing pages come through
+ * here too and must be handed back exactly as they were: isolation would gain
+ * them nothing and COEP would break any cross-origin embed they later grow. */
+const EDITOR_PATH = '/app/';
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
-  if (request.mode !== 'navigate') return;
+  const isEditorDocument =
+    request.mode === 'navigate' && new URL(request.url).pathname.startsWith(EDITOR_PATH);
+  // Worker scripts are rewritten wherever they live: they are served from
+  // /assets/, and only the editor ever asks for one.
+  if (!isEditorDocument && !WORKER_DESTINATIONS.has(request.destination)) return;
 
   event.respondWith(
     fetch(request).then((response) => {

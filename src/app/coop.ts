@@ -24,7 +24,13 @@ export function registerCoopWorker(): void {
   if (globalThis.crossOriginIsolated) return;
 
   const url = `${import.meta.env.BASE_URL}coop-sw.js`;
-  const scope = `${import.meta.env.BASE_URL}app/`;
+  // Root scope, not /app/. Scope decides which requests reach the worker at
+  // all, and the editor's own worker chunks are served from /assets/ - outside
+  // /app/, so under the narrower scope nothing handled them and they never got
+  // the COEP header a worker needs to start under an isolated document. The
+  // landing pages are still left untouched: the worker itself filters by URL
+  // (see public/coop-sw.js), which scope alone could not express.
+  const scope = import.meta.env.BASE_URL;
   navigator.serviceWorker.register(url, { scope }).catch((err) => {
     // Nothing to tell the user: this is an optimization that did not take.
     console.warn('[coop] service worker registration failed:', err);
