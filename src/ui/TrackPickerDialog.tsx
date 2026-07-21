@@ -9,6 +9,13 @@ import type { FFmpegProgress } from '../media/ffmpeg';
 /** Above this many rows, scanning the list by eye stops working: offer a filter. */
 const FILTER_ABOVE = 8;
 
+/** One track's line: a label when it can be ticked, a plain row otherwise. */
+function Row({ tickable, children }: { tickable: boolean; children: React.ReactNode }) {
+  const className = 'flex items-center gap-3';
+  if (!tickable) return <div className={className}>{children}</div>;
+  return <label className={`${className} cursor-pointer py-1`}>{children}</label>;
+}
+
 export interface PickerTrack {
   /** Position among tracks of this kind, which is also what ffmpeg's `0:s:<n>` selects. */
   index: number;
@@ -45,6 +52,7 @@ export function TrackPickerDialog({
   actionLabel,
   actionHint,
   icon,
+  multiple = false,
   onPick,
   onCancelJob,
   onClose,
@@ -56,12 +64,23 @@ export function TrackPickerDialog({
   actionLabel: string;
   actionHint: string;
   icon: React.ReactNode;
-  onPick: (index: number) => void;
+  /**
+   * Let the user tick several tracks and bring them in together.
+   *
+   * Only worth offering where the batch is genuinely cheaper than the sum of its
+   * parts: subtitle tracks share one pass over the container, so six of them
+   * cost one read instead of six. Audio does not get this - the converted
+   * tracks are held whole in the converter's memory until the pass ends, and
+   * three feature-length ones at once is how that runs out.
+   */
+  multiple?: boolean;
+  onPick: (indexes: number[]) => void;
   onCancelJob: (index: number) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
+  const [picked, setPicked] = useState<number[]>([]);
 
   // Escape closes; capture phase so the global editor hotkeys never see it while
   // the dialog owns the screen.
@@ -77,9 +96,13 @@ export function TrackPickerDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // A stale filter must not greet the next opening with an empty list.
+  // A stale filter must not greet the next opening with an empty list, and a
+  // stale selection must not come back ticked.
   useEffect(() => {
-    if (!open) setQuery('');
+    if (!open) {
+      setQuery('');
+      setPicked([]);
+    }
   }, [open]);
 
   const shown = useMemo(() => {
@@ -153,7 +176,9 @@ export function TrackPickerDialog({
                           onCancel={() => onCancelJob(track.index)}
                         />
                       ) : (
-                        <div className="flex items-center gap-3">
+                        // A tickable row is a label, so the whole line is the
+                        // hit target: a 16 px checkbox is not one on touch.
+                        <Row tickable={multiple && !track.unavailable}>
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-xs text-zinc-200">{track.name}</div>
                             <div className="mt-0.5 truncate text-[11px] text-zinc-500">
@@ -162,24 +187,60 @@ export function TrackPickerDialog({
                                 : track.detail}
                             </div>
                           </div>
-                          {!track.unavailable && (
-                            <Tooltip label={actionHint}>
-                              <button
-                                className="touch-hit flex-none rounded-lg bg-sky-500/15 px-2.5 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-500/25 active:bg-sky-500/30"
-                                onClick={() => onPick(track.index)}
-                              >
-                                {icon}
-                                {actionLabel}
-                              </button>
-                            </Tooltip>
-                          )}
-                        </div>
+                          {!track.unavailable &&
+                            (multiple ? (
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 flex-none accent-sky-500"
+                                checked={picked.includes(track.index)}
+                                aria-label={track.name}
+                                onChange={(e) =>
+                                  setPicked((prev) =>
+                                    e.target.checked
+                                      ? [...prev, track.index]
+                                      : prev.filter((i) => i !== track.index),
+                                  )
+                                }
+                              />
+                            ) : (
+                              <Tooltip label={actionHint}>
+                                <button
+                                  className="touch-hit flex-none rounded-lg bg-sky-500/15 px-2.5 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-500/25 active:bg-sky-500/30"
+                                  onClick={() => onPick([track.index])}
+                                >
+                                  {icon}
+                                  {actionLabel}
+                                </button>
+                              </Tooltip>
+                            ))}
+                        </Row>
                       )}
                     </li>
                   ))}
                 </ul>
               )}
             </div>
+
+            {multiple && (
+              // Always mounted, disabled while nothing is ticked: a button that
+              // appears on the first tick shifts the list under the finger that
+              // just tapped it.
+              <div className="mt-3 flex items-center justify-between gap-3 border-t border-zinc-800 pt-3">
+                <span className="min-w-0 truncate text-[11px] text-zinc-500">
+                  {t('library.tracks.selected', { count: picked.length })}
+                </span>
+                <Tooltip label={actionHint}>
+                  <button
+                    className="touch-hit flex-none rounded-lg bg-sky-500/15 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-500/25 active:bg-sky-500/30 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-600"
+                    disabled={picked.length === 0}
+                    onClick={() => onPick(picked)}
+                  >
+                    {icon}
+                    {actionLabel}
+                  </button>
+                </Tooltip>
+              </div>
+            )}
           </motion.div>
         </motion.div>
       )}

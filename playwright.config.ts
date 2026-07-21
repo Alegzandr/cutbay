@@ -8,6 +8,10 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: 'e2e',
+  // `prod-*` specs test what only exists in a build (the COOP/COEP service
+  // worker, which is skipped in dev): they run against `vite preview` from
+  // playwright.prod.config.ts and would fail outright here.
+  testIgnore: /prod-.*\.spec\.ts/,
   // Video decode/encode dominates test time; keep the budget generous.
   timeout: 120_000,
   expect: { timeout: 15_000 },

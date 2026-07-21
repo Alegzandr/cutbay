@@ -274,6 +274,7 @@ function TrackGroup({
   actionHint,
   icon,
   rowTitle,
+  multiple = false,
   onPick,
   onCancelJob,
 }: {
@@ -285,7 +286,9 @@ function TrackGroup({
   actionHint: string;
   icon: React.ReactNode;
   rowTitle: (track: PickerTrack) => string;
-  onPick: (index: number) => void;
+  /** Offer ticking several rows in the dialog - see TrackPickerDialog. */
+  multiple?: boolean;
+  onPick: (indexes: number[]) => void;
   onCancelJob: (index: number) => void;
 }) {
   const { t } = useTranslation();
@@ -333,7 +336,7 @@ function TrackGroup({
                 icon={icon}
                 action={action}
                 hint={actionHint}
-                onClick={() => onPick(track.index)}
+                onClick={() => onPick([track.index])}
               />
             ),
           )
@@ -347,8 +350,9 @@ function TrackGroup({
         actionLabel={action}
         actionHint={actionHint}
         icon={icon}
-        onPick={(index) => {
-          onPick(index);
+        multiple={multiple}
+        onPick={(indexes) => {
+          onPick(indexes);
           setPickerOpen(false);
         }}
         onCancelJob={onCancelJob}
@@ -396,7 +400,12 @@ function UndecodableAudio({ asset }: { asset: MediaAsset }) {
       actionHint={t('library.audio.activateHint')}
       icon={<AudioLines className="mr-0.5 inline h-3 w-3" />}
       rowTitle={(track) => t('library.audio.needsTranscode', { codec: track.detail })}
-      onPick={(index) => void useStore.getState().transcodeAudioTrack(asset.id, index)}
+      onPick={(indexes) => {
+        // Deliberately one at a time: converted audio is held whole in the
+        // converter's memory until the pass ends, so batching feature-length
+        // tracks trades a saved read for running out of it.
+        for (const index of indexes) void useStore.getState().transcodeAudioTrack(asset.id, index);
+      }}
       onCancelJob={(index) => useStore.getState().cancelTranscode(asset.id, index)}
     />
   );
@@ -464,7 +473,9 @@ function SubtitleTracks({ asset }: { asset: MediaAsset }) {
           ? t('library.subtitles.bitmapHint', { format: track.detail })
           : t('library.subtitles.importHint')
       }
-      onPick={(index) => void useStore.getState().importSubtitleTrack(asset.id, index)}
+      // Several tracks share one read of the container: ticking is worth it here.
+      multiple
+      onPick={(indexes) => void useStore.getState().importSubtitleTracks(asset.id, indexes)}
       onCancelJob={(index) => useStore.getState().cancelSubtitleImport(asset.id, index)}
     />
   );

@@ -1,6 +1,12 @@
 import { AudioTrackInfo, MediaAsset, Project, isTrackPlayable } from '../types';
 import { useStore } from '../store/store';
 import { ensureAssetVisuals } from '../media/probe';
+import { setTranscodedAudio } from '../media/mediaCache';
+// Static, despite only being needed after a restore: both modules are already
+// in the main chunk through the store, so importing them lazily would split
+// nothing and only cost a round trip. The 32 MB core is NOT pulled in by this -
+// the ffmpeg runtime imports it dynamically, on first job.
+import { decodeCachedAudio } from '../media/transcodeAudio';
 import { isMissingSource } from './missingSource';
 import { t } from '../i18n';
 
@@ -24,9 +30,11 @@ function reportSaveFailure(err: unknown): void {
  */
 
 const DB_NAME = 'selfcut';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const PROJECT_STORE = 'project';
 const ASSETS_STORE = 'assets';
+/** Compressed copies of transcoded audio tracks, keyed `${assetId}#${trackIndex}`. */
+const AUDIO_STORE = 'transcodedAudio';
 const PROJECT_KEY = 'current';
 const SAVE_DEBOUNCE_MS = 500;
 
@@ -41,11 +49,75 @@ function db(): Promise<IDBDatabase> {
       if (!d.objectStoreNames.contains(ASSETS_STORE)) {
         d.createObjectStore(ASSETS_STORE, { keyPath: 'id' });
       }
+      if (!d.objectStoreNames.contains(AUDIO_STORE)) d.createObjectStore(AUDIO_STORE);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
   return dbPromise;
+}
+
+function audioCacheKey(assetId: string, audioTrackIndex: number): string {
+  return `${assetId}#${audioTrackIndex}`;
+}
+
+/**
+ * Keep the compressed copy of a transcoded track, so reopening the project does
+ * not re-run a conversion that takes minutes.
+ *
+ * A failure here is deliberately swallowed rather than surfaced: the transcode
+ * itself succeeded and the track is audible for this session. All that is lost
+ * is the shortcut next time, which is not worth a toast over a full disk.
+ */
+export async function saveTranscodedAudio(
+  assetId: string,
+  audioTrackIndex: number,
+  bytes: Uint8Array,
+): Promise<void> {
+  try {
+    const d = await db();
+    const tx = d.transaction(AUDIO_STORE, 'readwrite');
+    tx.objectStore(AUDIO_STORE).put(bytes, audioCacheKey(assetId, audioTrackIndex));
+    await txDone(tx);
+  } catch (err) {
+    console.warn('[persistence] transcoded audio not cached:', err);
+  }
+}
+
+/** The cached copy of a transcoded track, or null if there is none. */
+export async function loadTranscodedAudio(
+  assetId: string,
+  audioTrackIndex: number,
+): Promise<Uint8Array | null> {
+  try {
+    const d = await db();
+    const tx = d.transaction(AUDIO_STORE, 'readonly');
+    const bytes = await requestDone(
+      tx.objectStore(AUDIO_STORE).get(audioCacheKey(assetId, audioTrackIndex)),
+    );
+    return bytes instanceof Uint8Array ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Drop every cached track of an asset, when the asset itself goes away. */
+async function dropTranscodedAudio(assetId: string): Promise<void> {
+  try {
+    const d = await db();
+    const tx = d.transaction(AUDIO_STORE, 'readwrite');
+    const store = tx.objectStore(AUDIO_STORE);
+    // Keys are `${assetId}#${index}`: bound the range on the prefix rather than
+    // walk every entry in the store.
+    // U+FFFF sorts above any real key suffix. Written as an escape, not as the
+    // character itself: a literal non-character in source survives editors and
+    // encoding round-trips far less reliably than it reads.
+    const range = IDBKeyRange.bound(`${assetId}#`, `${assetId}#\uffff`);
+    for (const key of await requestDone(store.getAllKeys(range))) store.delete(key);
+    await txDone(tx);
+  } catch (err) {
+    console.warn('[persistence] transcoded audio not cleared:', err);
+  }
 }
 
 function requestDone<T>(req: IDBRequest<T>): Promise<T> {
@@ -115,10 +187,13 @@ async function isFileReadable(file: File): Promise<boolean> {
 
 /**
  * `transcoded` marks an undecodable track whose PCM sits in the in-memory cache.
- * That cache dies with the tab (we persist peaks, never decoded audio), so a
- * restored asset must forget the flag: keeping it would claim the track is
- * audible and export it as silence. Its peaks survive, so the waveform is still
- * there and the user only has to re-run the transcode.
+ * That cache dies with the tab, so a restored asset must forget the flag:
+ * keeping it would claim the track is audible and export it as silence.
+ *
+ * The flag is re-earned, not assumed: `restoreTranscodedTracks` puts it back
+ * only for the tracks whose compressed copy is still in the database AND still
+ * decodes. Between the two, a track whose cache is gone degrades to what it did
+ * before the cache existed - peaks intact, one transcode to re-run.
  */
 function dropTranscodedFlags(asset: MediaAsset): MediaAsset {
   if (!asset.audioTracks.some((track) => track.transcoded)) return asset;
@@ -163,6 +238,50 @@ async function loadPersisted(): Promise<{ project: Project; assets: MediaAsset[]
   return { project, assets };
 }
 
+/**
+ * Republish every transcoded track whose compressed copy survived, so a
+ * reopened project is audible without re-running conversions that take minutes.
+ *
+ * Runs after hydrate rather than inside it: decoding is asynchronous and the
+ * editor must not wait on it to appear. Tracks light up as they land, in the
+ * same way a background thumbnail pass fills the strip.
+ */
+async function restoreTranscodedTracks(assets: MediaAsset[]): Promise<void> {
+  await Promise.all(
+    assets.flatMap((asset) =>
+      // Only an undecodable track can have been transcoded; a disconnected
+      // asset has no source to fall back on either way, but its cached audio is
+      // still perfectly good, so it is deliberately not skipped here.
+      asset.audioTracks
+        .filter((track) => track.undecodable)
+        .map(async (track) => {
+          const bytes = await loadTranscodedAudio(asset.id, track.index);
+          if (!bytes) return;
+          const buffer = await decodeCachedAudio(bytes);
+          if (!buffer) return;
+
+          // The library can have changed while this decoded: an asset the user
+          // removed in the meantime must not come back audible.
+          const current = useStore.getState().assets[asset.id];
+          if (!current || current.file !== asset.file) return;
+
+          const peaks = setTranscodedAudio(asset.id, track.index, buffer, {
+            alsoPrimary: current.audioTracks.length === 1,
+          });
+          const audioTracks = current.audioTracks.map((tr) =>
+            tr.index === track.index ? { ...tr, transcoded: true, peaks } : tr,
+          );
+          useStore.setState({
+            assets: {
+              ...useStore.getState().assets,
+              [asset.id]: { ...current, audioTracks, hasAudio: true },
+            },
+          });
+        }),
+    ),
+  );
+}
+
 let saveTimer: number | null = null;
 
 function scheduleProjectSave(project: Project): void {
@@ -196,7 +315,12 @@ async function syncAssets(
       if (prev[id] !== asset) store.put(asset);
     }
     for (const id of Object.keys(prev)) {
-      if (!(id in next)) store.delete(id);
+      if (!(id in next)) {
+        store.delete(id);
+        // The cached audio is worthless without the asset it belongs to, and it
+        // is the largest thing this database holds after the media itself.
+        void dropTranscodedAudio(id);
+      }
     }
     await txDone(tx);
   } catch (err) {
@@ -225,6 +349,9 @@ export async function initPersistence(): Promise<void> {
       // Skip disconnected assets: their file cannot be read, so decoding would
       // only throw - they wait for the user to reconnect the source.
       for (const asset of saved.assets) if (!asset.disconnected) ensureAssetVisuals(asset, s);
+      // Not awaited: the editor is usable now, and transcoded tracks light up
+      // as their cached audio decodes.
+      void restoreTranscodedTracks(saved.assets);
     }
   } catch (err) {
     console.warn('[persistence] restore failed:', err);

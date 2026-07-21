@@ -451,6 +451,8 @@
   "library.tracks.browse": "Escolher uma faixa",
   "library.tracks.filter": "Filtrar faixas",
   "library.tracks.noMatch": "Nenhuma faixa corresponde",
+  "library.tracks.selected_one": "{{count}} faixa selecionada",
+  "library.tracks.selected_other": "{{count}} faixas selecionadas",
   "library.tracks.close": "Fechar",
   "library.subtitles.trackNumber": "Legendas {{n}}",
   "library.subtitles.pickerTitle": "Faixas de legendas incorporadas",

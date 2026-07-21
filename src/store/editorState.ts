@@ -217,6 +217,16 @@ export interface EditorState {
    * in `transcodes`, and a second call for a running track is a no-op.
    */
   importSubtitleTrack: (assetId: string, subtitleTrackIndex: number) => Promise<void>;
+  /**
+   * The same, for several tracks of one file at once - and the path the single
+   * import delegates to.
+   *
+   * Worth its own entry point because it is not a loop: ffmpeg reads the whole
+   * container whatever it is asked to extract, so six tracks taken together cost
+   * one read of a multi-GB rip where six separate imports cost six. Bitmap and
+   * already-running tracks are skipped, and the lot lands as one undo step.
+   */
+  importSubtitleTracks: (assetId: string, subtitleTrackIndexes: number[]) => Promise<void>;
   /** Abort a running subtitle extraction (nothing is laid down). */
   cancelSubtitleImport: (assetId: string, subtitleTrackIndex: number) => void;
   /**

@@ -451,6 +451,8 @@
   "library.tracks.browse": "Choose a track",
   "library.tracks.filter": "Filter tracks",
   "library.tracks.noMatch": "No track matches",
+  "library.tracks.selected_one": "{{count}} track selected",
+  "library.tracks.selected_other": "{{count}} tracks selected",
   "library.tracks.close": "Close",
   "library.subtitles.trackNumber": "Subtitles {{n}}",
   "library.subtitles.pickerTitle": "Embedded subtitle tracks",

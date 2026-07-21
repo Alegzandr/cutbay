@@ -451,6 +451,8 @@
   "library.tracks.browse": "Spur auswählen",
   "library.tracks.filter": "Spuren filtern",
   "library.tracks.noMatch": "Keine Spur gefunden",
+  "library.tracks.selected_one": "{{count}} Spur ausgewählt",
+  "library.tracks.selected_other": "{{count}} Spuren ausgewählt",
   "library.tracks.close": "Schließen",
   "library.subtitles.trackNumber": "Untertitel {{n}}",
   "library.subtitles.pickerTitle": "Eingebettete Untertitelspuren",

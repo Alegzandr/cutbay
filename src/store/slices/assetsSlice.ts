@@ -4,7 +4,8 @@ import { audioKey, disposeAssetResources, setTranscodedAudio } from '../../media
 import { ensureAssetVisuals, probeFile } from '../../media/probe';
 import { FFmpegCanceled, type FFmpegProgress } from '../../media/ffmpeg';
 import { transcodeAudioTrack } from '../../media/transcodeAudio';
-import { extractSubtitleTrack, subtitleKey } from '../../media/extractSubtitles';
+import { extractSubtitleTracks, subtitleKey } from '../../media/extractSubtitles';
+import { saveTranscodedAudio } from '../../lib/persistence';
 import { t } from '../../i18n';
 
 /**
@@ -44,6 +45,7 @@ export function createAssetsSlice(
   | 'transcodeAudioTrack'
   | 'cancelTranscode'
   | 'importSubtitleTrack'
+  | 'importSubtitleTracks'
   | 'cancelSubtitleImport'
 > {
   return {
@@ -173,7 +175,7 @@ export function createAssetsSlice(
       // lie the user reads as a stall.
       setProgress(set, get, key, { phase: 'queued', ratio: null });
       try {
-        const buffer = await transcodeAudioTrack(asset, audioTrackIndex, {
+        const { buffer, compressed } = await transcodeAudioTrack(asset, audioTrackIndex, {
           signal: controller.signal,
           onProgress: (progress) => setProgress(set, get, key, progress),
         });
@@ -201,8 +203,20 @@ export function createAssetsSlice(
           },
         });
         // A clip already sitting on the timeline gains the lane it could not
-        // have at drop time.
-        get().attachAudioTrack(assetId, audioTrackIndex);
+        // have at drop time. Footage still library-only lands whole instead:
+        // the track counts as playable from the commit above, so the picture
+        // arrives with every audible lane, this one included. Transcoding is
+        // the user saying they want that sound - handing them a silent library
+        // card and a second click to place it is not the ask.
+        const placed = get().project.tracks.some((tr) =>
+          tr.clips.some((c) => c.assetId === assetId),
+        );
+        if (placed) get().attachAudioTrack(assetId, audioTrackIndex);
+        else get().addClipFromAsset(assetId);
+        // Keep the compressed copy so reopening the project does not re-run
+        // this. Not awaited: the track is already audible, and a full disk must
+        // not turn a successful transcode into a failed one.
+        if (compressed) void saveTranscodedAudio(assetId, audioTrackIndex, compressed);
         // Long enough that the user has almost certainly looked away: say so.
         get().setNotice(t('library.audio.ready', { name: asset.file.name }));
       } catch (err) {
@@ -228,22 +242,40 @@ export function createAssetsSlice(
       controllers.get(audioKey(assetId, audioTrackIndex))?.abort();
     },
 
-    importSubtitleTrack: async (assetId, subtitleTrackIndex) => {
-      const asset = get().assets[assetId];
-      const track = asset?.subtitleTracks?.find((tr) => tr.index === subtitleTrackIndex);
-      // A bitmap track has no text to extract: the UI never offers it, and a
-      // command path must not be able to route around that.
-      if (!asset || !track || track.bitmap) return;
-      const key = subtitleKey(assetId, subtitleTrackIndex);
-      if (key in get().transcodes) return;
+    importSubtitleTrack: (assetId, subtitleTrackIndex) =>
+      get().importSubtitleTracks(assetId, [subtitleTrackIndex]),
 
+    importSubtitleTracks: async (assetId, subtitleTrackIndexes) => {
+      const asset = get().assets[assetId];
+      if (!asset) return;
+      // A bitmap track has no text to extract: the UI never offers it, and a
+      // command path must not be able to route around that. Same for a track
+      // already being extracted - asking twice must not queue a second read.
+      const tracks = (asset.subtitleTracks ?? []).filter(
+        (tr) =>
+          subtitleTrackIndexes.includes(tr.index) &&
+          !tr.bitmap &&
+          !(subtitleKey(assetId, tr.index) in get().transcodes),
+      );
+      if (tracks.length === 0) return;
+      const indexes = tracks.map((tr) => tr.index);
+      const keys = indexes.map((i) => subtitleKey(assetId, i));
+
+      // One job, so one controller: cancelling any of the tracks it covers
+      // cancels the pass, which is the only thing there is to cancel.
       const controller = new AbortController();
-      controllers.set(key, controller);
-      setProgress(set, get, key, { phase: 'queued', ratio: null });
+      for (const key of keys) {
+        controllers.set(key, controller);
+        setProgress(set, get, key, { phase: 'queued', ratio: null });
+      }
+      // A batch reports one progress for the whole pass: it IS one pass.
+      const report = (progress: FFmpegProgress) => {
+        for (const key of keys) setProgress(set, get, key, progress);
+      };
       try {
-        const cues = await extractSubtitleTrack(asset, subtitleTrackIndex, {
+        const byTrack = await extractSubtitleTracks(asset, indexes, {
           signal: controller.signal,
-          onProgress: (progress) => setProgress(set, get, key, progress),
+          onProgress: report,
         });
         // The asset can have been removed (or its file reconnected) during a job
         // that runs for a while: the cues would belong to a source that is gone.
@@ -252,7 +284,11 @@ export function createAssetsSlice(
         // a perfectly good extraction.
         const current = get().assets[assetId];
         if (!current || current.file !== asset.file) return;
-        if (cues.length === 0) {
+
+        const cueLists = indexes
+          .map((i) => byTrack.get(i))
+          .filter((cues): cues is NonNullable<typeof cues> => !!cues && cues.length > 0);
+        if (cueLists.length === 0) {
           get().setError(t('errors.media.noCues', { name: asset.file.name }));
           return;
         }
@@ -262,17 +298,16 @@ export function createAssetsSlice(
         const onTimeline = get().project.tracks.some((tr) =>
           tr.clips.some((c) => c.assetId === assetId),
         );
-        // Footage + captions are one undo step: a Ctrl+Z takes back the whole
-        // import, not just the text.
-        if (!onTimeline) {
-          get().beginGesture();
-          get().addClipFromAsset(assetId);
-        }
+        // Footage + captions are one undo step, and so are several tracks
+        // imported together: a Ctrl+Z takes back the whole import.
+        get().beginGesture();
+        if (!onTimeline) get().addClipFromAsset(assetId);
         // From here on an embedded track is indistinguishable from an imported
         // .srt: same cues, same parser, same caption track.
-        get().addSubtitleClips(cues, assetId);
-        if (!onTimeline) get().endGesture();
-        get().setNotice(t('library.subtitles.ready', { count: cues.length }));
+        for (const cues of cueLists) get().addSubtitleClips(cues, assetId);
+        get().endGesture();
+        const count = cueLists.reduce((n, cues) => n + cues.length, 0);
+        get().setNotice(t('library.subtitles.ready', { count }));
       } catch (err) {
         if (!(err instanceof FFmpegCanceled)) {
           // The toast says what failed, in the user's terms; the console keeps
@@ -281,13 +316,15 @@ export function createAssetsSlice(
           get().setError(
             t('errors.media.subtitleFailed', {
               name: asset.file.name,
-              codec: track.codec ?? '?',
+              codec: tracks[0]?.codec ?? '?',
             }),
           );
         }
       } finally {
-        controllers.delete(key);
-        clearProgress(set, get, key);
+        for (const key of keys) {
+          controllers.delete(key);
+          clearProgress(set, get, key);
+        }
       }
     },
 

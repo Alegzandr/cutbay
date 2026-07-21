@@ -451,6 +451,8 @@
   "library.tracks.browse": "Choisir une piste",
   "library.tracks.filter": "Filtrer les pistes",
   "library.tracks.noMatch": "Aucune piste ne correspond",
+  "library.tracks.selected_one": "{{count}} piste sélectionnée",
+  "library.tracks.selected_other": "{{count}} pistes sélectionnées",
   "library.tracks.close": "Fermer",
   "library.subtitles.trackNumber": "Sous-titres {{n}}",
   "library.subtitles.pickerTitle": "Pistes de sous-titres intégrées",

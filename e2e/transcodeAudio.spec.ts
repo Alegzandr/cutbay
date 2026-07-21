@@ -41,11 +41,14 @@ test('converts an audio track through ffmpeg.wasm and reports each phase', async
     };
 
     const file = makeWav(1, 48000);
-    const { transcodeAudioTrack } = await import('/src/media/transcodeAudio.ts');
+    // A server URL Vite resolves in the page, not a path on disk: keep the
+    // specifier out of a literal so tsc does not try to resolve it from here.
+    const modulePath = '/src/media/transcodeAudio.ts';
+    const { transcodeAudioTrack } = await import(modulePath);
 
     const phases: string[] = [];
     const ratios: number[] = [];
-    const buffer = await transcodeAudioTrack(
+    const { buffer, compressed } = await transcodeAudioTrack(
       { id: 'a', file, kind: 'audio', durationMs: 1000, hasAudio: true, audioTracks: [], thumbnails: [] },
       0,
       {
@@ -62,6 +65,10 @@ test('converts an audio track through ffmpeg.wasm and reports each phase', async
       channels: buffer.numberOfChannels,
       // A silent result would still "work" structurally: check there is signal.
       peak: Math.max(...buffer.getChannelData(0).map(Math.abs)),
+      // The compressed copy rides on the same exec and is what makes a reopened
+      // project audible without re-transcoding: its absence is a silent
+      // regression, since the session itself works fine without it.
+      compressedBytes: compressed ? compressed.byteLength : 0,
     };
   });
 
@@ -81,4 +88,6 @@ test('converts an audio track through ffmpeg.wasm and reports each phase', async
   // downmix costs the usual 3 dB (x0.707), landing near 0.43. Asserted loosely:
   // the point is that sound came through, not the exact downmix gain.
   expect(result.peak).toBeGreaterThan(0.3);
+  // Opus of a one-second tone is small but never empty.
+  expect(result.compressedBytes).toBeGreaterThan(0);
 });
