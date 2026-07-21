@@ -44,13 +44,20 @@ test('converts an audio track through ffmpeg.wasm and reports each phase', async
     const { transcodeAudioTrack } = await import('/src/media/transcodeAudio.ts');
 
     const phases: string[] = [];
+    const ratios: number[] = [];
     const buffer = await transcodeAudioTrack(
       { id: 'a', file, kind: 'audio', durationMs: 1000, hasAudio: true, audioTracks: [], thumbnails: [] },
       0,
-      { onProgress: (p: { phase: string }) => { if (phases.at(-1) !== p.phase) phases.push(p.phase); } },
+      {
+        onProgress: (p: { phase: string; ratio: number | null }) => {
+          if (phases.at(-1) !== p.phase) phases.push(p.phase);
+          if (p.phase === 'downloading' && p.ratio != null) ratios.push(p.ratio);
+        },
+      },
     );
     return {
       phases,
+      ratios,
       duration: buffer.duration,
       channels: buffer.numberOfChannels,
       // A silent result would still "work" structurally: check there is signal.
@@ -60,6 +67,12 @@ test('converts an audio track through ffmpeg.wasm and reports each phase', async
 
   // The order matters: it is what the progress UI narrates.
   expect(result.phases).toEqual(['downloading', 'converting', 'decoding']);
+  // The 32 MB core must report real byte progress, and reaching the end of it
+  // must not be mistaken for a truncated download - the mistake that made every
+  // conversion fail on any host that compresses the response.
+  expect(result.ratios.length).toBeGreaterThan(1);
+  expect(result.ratios.at(-1)).toBeCloseTo(1, 5);
+  expect(result.ratios).toEqual([...result.ratios].sort((a, b) => a - b));
   expect(result.duration).toBeGreaterThan(0.9);
   expect(result.duration).toBeLessThan(1.1);
   // -ac 2 downmixes to the stereo the mix bus expects, whatever the source.

@@ -49,6 +49,51 @@ let ffmpegPromise: Promise<LoadedFFmpeg> | null = null;
 const downloadListeners = new Set<(ratio: number | null) => void>();
 
 /**
+ * Fetch one file into a blob: URL, reporting bytes as they arrive.
+ *
+ * @ffmpeg/util ships toBlobURL for exactly this, but its progress path is unsafe:
+ * it treats Content-Length as a checksum and throws when it disagrees with the
+ * bytes read, which every compressed response guarantees - the header counts
+ * bytes on the wire while the reader yields decoded ones. Its fallback then
+ * calls arrayBuffer() on the body it has just consumed, which throws in turn, so
+ * a single compressing host between us and the core makes load() fail outright.
+ * Owning the fetch is less code than working around that.
+ *
+ * `total` is passed through as a hint, never as a contract: 0 means unknown.
+ */
+export async function fetchToBlobURL(
+  url: string,
+  mimeType: string,
+  onBytes: (received: number, total: number) => void,
+): Promise<string> {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`${url}: HTTP ${resp.status}`);
+  const declared = Number(resp.headers.get('Content-Length'));
+  const total = Number.isFinite(declared) && declared > 0 ? declared : 0;
+
+  const reader = resp.body?.getReader();
+  // No streaming body to read: the response is still perfectly usable.
+  if (!reader) {
+    const buf = await resp.arrayBuffer();
+    onBytes(buf.byteLength, buf.byteLength);
+    return URL.createObjectURL(new Blob([buf], { type: mimeType }));
+  }
+
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    onBytes(received, total);
+  }
+  // Blob takes the chunks as they are: concatenating first would cost a second
+  // full copy of 32 MB for nothing.
+  return URL.createObjectURL(new Blob(chunks as BlobPart[], { type: mimeType }));
+}
+
+/**
  * Load ffmpeg.wasm once per session. Single-threaded on purpose: the
  * multi-threaded core needs COOP/COEP headers, which GitHub Pages cannot send
  * (the CSP already ships as a meta tag for the same reason).
@@ -56,30 +101,40 @@ const downloadListeners = new Set<(ratio: number | null) => void>();
 function loadFFmpeg(): Promise<LoadedFFmpeg> {
   if (!ffmpegPromise) {
     ffmpegPromise = (async () => {
-      const [{ FFmpeg, FFFSType }, { toBlobURL }] = await Promise.all([
-        import('@ffmpeg/ffmpeg'),
-        import('@ffmpeg/util'),
-      ]);
+      const { FFmpeg, FFFSType } = await import('@ffmpeg/ffmpeg');
 
       // Fetched by hand rather than handed to load() as plain URLs, purely to
       // get byte progress out of the 32 MB download. Both end up as blob: URLs,
       // which the CSP allows in script-src for exactly this.
-      const bytes = new Map<string, { received: number; total: number }>();
-      const track = (e: { url: string | URL; received: number; total: number }) => {
-        bytes.set(String(e.url), { received: e.received, total: e.total });
-        let received = 0;
-        let total = 0;
+      const jsURL = `${CORE_BASE}/ffmpeg-core.js`;
+      const binURL = `${CORE_BASE}/ffmpeg-core.wasm`;
+      // Seeded so the ratio only goes measurable once both downloads have
+      // declared a size, instead of jumping while the second one is still
+      // opening its response.
+      const bytes = new Map<string, { received: number; total: number }>([
+        [jsURL, { received: 0, total: 0 }],
+        [binURL, { received: 0, total: 0 }],
+      ]);
+      const track = (url: string) => (received: number, total: number) => {
+        // Content-Length counts bytes on the wire, so on a compressed response
+        // the reader outruns it. Once that happens the header says nothing
+        // useful: drop it rather than pin the bar at 100 % for the rest.
+        bytes.set(url, { received, total: received > total ? 0 : total });
+        let got = 0;
+        let expected = 0;
+        let measurable = true;
         for (const b of bytes.values()) {
-          received += b.received;
-          total += b.total;
+          got += b.received;
+          if (b.total > 0) expected += b.total;
+          else measurable = false;
         }
-        // A response without Content-Length reports -1: no bar beats a lying one.
-        const ratio = total > 0 ? Math.min(1, received / total) : null;
+        // An unmeasurable download reports null: no bar beats a lying one.
+        const ratio = measurable && expected > 0 ? Math.min(1, got / expected) : null;
         for (const listener of downloadListeners) listener(ratio);
       };
       const [coreURL, wasmURL] = await Promise.all([
-        toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, 'text/javascript', true, track),
-        toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, 'application/wasm', true, track),
+        fetchToBlobURL(jsURL, 'text/javascript', track(jsURL)),
+        fetchToBlobURL(binURL, 'application/wasm', track(binURL)),
       ]);
 
       const ffmpeg = new FFmpeg();
@@ -198,9 +253,14 @@ export async function transcodeAudioTrack(
     report('decoding', null);
     const data = await ffmpeg.readFile(outName);
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    // Copy into a standalone ArrayBuffer: decodeAudioData detaches what it is
-    // given, and ffmpeg's view points into the wasm heap.
-    const wav = bytes.slice().buffer as ArrayBuffer;
+    // decodeAudioData detaches the buffer it is handed, so it must own it whole.
+    // Crossing the worker boundary already produced a standalone copy, and on an
+    // episode-length track that copy is hundreds of megabytes: only re-copy when
+    // the view really is a window onto something larger.
+    const wav =
+      bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+        ? (bytes.buffer as ArrayBuffer)
+        : (bytes.slice().buffer as ArrayBuffer);
     // Free the wasm-side copy before decoding, so the WAV and the AudioBuffer
     // are never all three in memory at once on a long source.
     await ffmpeg.deleteFile(outName).catch(() => undefined);

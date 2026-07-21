@@ -12,6 +12,12 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 15_000 },
   fullyParallel: true,
+  // Nearly every test drives WebCodecs, and one of them now loads a 32 MB wasm
+  // build of ffmpeg: they contend for the same hardware encoder rather than for
+  // CPU, so the default worker count oversubscribes it and the export test times
+  // out waiting on a stalled encode. Two workers run the suite in seconds; the
+  // unbounded default took over a minute and failed.
+  workers: 2,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',

@@ -199,6 +199,10 @@ export function createAssetsSlice(
         get().setNotice(t('library.audio.ready', { name: asset.file.name }));
       } catch (err) {
         if (!(err instanceof TranscodeCanceled)) {
+          // The toast says what failed, in the user's terms; the console keeps
+          // why. Without this the only symptom of a broken load path was a
+          // sentence naming the file, which is not something anyone can act on.
+          console.error('audio transcode failed', err);
           get().setError(
             t('errors.media.transcodeFailed', {
               name: asset.file.name,

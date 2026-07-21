@@ -75,6 +75,9 @@ function copyFFmpegCore(): Plugin {
           'Content-Type',
           name.endsWith('.wasm') ? 'application/wasm' : 'text/javascript',
         );
+        // Announce the size so the download reports real progress in dev too,
+        // instead of an indeterminate bar the production build does not have.
+        res.setHeader('Content-Length', fs.statSync(sourceOf(name)).size);
         fs.createReadStream(sourceOf(name)).pipe(res);
       });
     },
