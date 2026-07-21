@@ -18,11 +18,6 @@ const require = createRequire(import.meta.url);
 const CSP = [
   "default-src 'self'",
   "script-src 'self' 'wasm-unsafe-eval' blob:",
-  // Emscripten instantiates the core by fetching its .wasm, and we hand it a
-  // blob: URL (see fetchToBlobURL in src/media/ffmpeg.ts). That fetch is
-  // governed by connect-src, which without this line falls back to default-src
-  // and is refused - the core downloads to 100 %, then load() never resolves.
-  "connect-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' blob: data:",
   "media-src 'self' blob:",

@@ -1,5 +1,11 @@
 import { MediaAsset } from '../types';
-import { FFmpegCanceled, runFFmpegJob, toOwnedBuffer, type FFmpegProgress } from './ffmpeg';
+import {
+  FFmpegCanceled,
+  FFmpegLoadFailed,
+  runFFmpegJob,
+  toOwnedBuffer,
+  type FFmpegProgress,
+} from './ffmpeg';
 
 /**
  * On-demand audio conversion for tracks WebCodecs cannot decode (E-AC-3, AC-3,
@@ -117,6 +123,9 @@ export async function transcodeAudioTrack(
       )) as [Uint8Array, Uint8Array];
     } catch (err) {
       if (signal?.aborted) throw err;
+      // The core never came up, so the arguments are not what failed: retrying
+      // them only spends the load timeout again for the same outcome.
+      if (err instanceof FFmpegLoadFailed) throw err;
       // Retry without the cached copy. If THIS works, the encoder is what
       // failed and no later track should try it again; if it fails too, the
       // track is the problem and the encoder keeps its turn. Safe to retry on

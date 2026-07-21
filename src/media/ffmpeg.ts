@@ -63,6 +63,37 @@ export function ffmpegThreads(): number | null {
 const MOUNT_DIR = '/mount';
 
 /**
+ * Watchdogs on getting the runtime up. Neither guards against slowness: they
+ * guard against silence.
+ *
+ * Every way loading the core has failed so far - a blocked fetch, a service
+ * worker dropping a stream, a policy the page did not have - surfaced the same
+ * way: the progress bar stopped and nothing else ever happened. There was no
+ * error to read because nothing rejected, so the UI could only keep saying
+ * "downloading" forever.
+ *
+ * STALL is per read, not for the whole download: the core is 32 MB and a slow
+ * connection is allowed to take as long as it needs, as long as bytes keep
+ * arriving. INIT covers instantiating the module once the bytes are in hand,
+ * which is local work and answers in seconds - or, when the page is missing
+ * something the core needs, never.
+ */
+const CORE_STALL_MS = 45_000;
+const CORE_INIT_MS = 60_000;
+
+/**
+ * Reject if `promise` has not settled in `ms`. The timer is always cleared, so a
+ * winning promise does not leave one pending until the timeout would have run.
+ */
+function withDeadline<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
+}
+
+/**
  * The stages a job goes through, in order. They are reported separately because
  * they fail differently and, above all, take wildly different amounts of time:
  * without the distinction a user watching 0 % for a minute of downloading cannot
@@ -131,7 +162,10 @@ export async function fetchToBlobURL(
   mimeType: string,
   onBytes: (received: number, total: number) => void,
 ): Promise<string> {
-  const resp = await fetch(url);
+  // The deadline covers opening the response, not just reading it: a host that
+  // accepts the connection and then says nothing never reaches the read loop
+  // below, so a watchdog on reads alone would wait for ever.
+  const resp = await withDeadline(fetch(url), CORE_STALL_MS, `${url}: no response`);
   if (!resp.ok) throw new Error(`${url}: HTTP ${resp.status}`);
   const declared = Number(resp.headers.get('Content-Length'));
   const total = Number.isFinite(declared) && declared > 0 ? declared : 0;
@@ -147,7 +181,11 @@ export async function fetchToBlobURL(
   const chunks: Uint8Array[] = [];
   let received = 0;
   for (;;) {
-    const { done, value } = await reader.read();
+    const { done, value } = await withDeadline(
+      reader.read(),
+      CORE_STALL_MS,
+      `${url}: stalled with ${received} bytes received`,
+    );
     if (done) break;
     chunks.push(value);
     received += value.length;
@@ -232,7 +270,16 @@ function loadFFmpeg(): Promise<LoadedFFmpeg> {
       const { FFmpeg, FFFSType } = await import('@ffmpeg/ffmpeg');
       const urls = await loadCoreURLs();
       const ffmpeg = new FFmpeg();
-      await ffmpeg.load(urls);
+      // The failure this catches is the core refusing to come up at all, which
+      // it does by hanging rather than throwing - a thread it cannot spawn, a
+      // wasm it cannot fetch. Naming the build in the message is the whole
+      // point: single-threaded and multi-threaded fail for different reasons,
+      // and which one ran is not otherwise visible from a bug report.
+      await withDeadline(
+        ffmpeg.load(urls),
+        CORE_INIT_MS,
+        `ffmpeg core (${ffmpegThreads() != null ? 'multi' : 'single'}-threaded) never finished loading`,
+      );
       return { ffmpeg, workerFs: FFFSType.WORKERFS };
     })().catch((err) => {
       // A failed load must not poison the session: let the next attempt retry.
@@ -250,6 +297,20 @@ function loadFFmpeg(): Promise<LoadedFFmpeg> {
  */
 function discardFFmpeg(): void {
   ffmpegPromise = null;
+}
+
+/**
+ * The runtime never came up. Distinct from a job failing because callers retry
+ * failed jobs with different arguments, and that retry is worth nothing when it
+ * is the core that is down: it only makes the user wait through the same
+ * timeout a second time before seeing the same error.
+ */
+export class FFmpegLoadFailed extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'FFmpegLoadFailed';
+    this.cause = cause;
+  }
 }
 
 export class FFmpegCanceled extends Error {
@@ -351,6 +412,10 @@ export function runFFmpegJob({
     let loaded: LoadedFFmpeg;
     try {
       loaded = await loadFFmpeg();
+    } catch (err) {
+      // A cancel during the download is the user's doing, not a load failure.
+      if (signal?.aborted) throw new FFmpegCanceled();
+      throw new FFmpegLoadFailed(err);
     } finally {
       downloadListeners.delete(onDownload);
     }
