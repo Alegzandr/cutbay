@@ -12,6 +12,7 @@ import {
   warmAudio,
 } from './mediaCache';
 import { decodeImageFile, isImageFile } from './stillImage';
+import { detectSubtitleTracks } from './containerSubtitles';
 import { t } from '../i18n';
 
 /**
@@ -119,6 +120,9 @@ export async function probeFile(file: File, reuseId?: string): Promise<ProbeResu
 
   const videoTrack = await input.getPrimaryVideoTrack();
   const audioTracks = await probeAudioTracks(input);
+  // Header-only, so it costs a couple of reads and never blocks on a decoder.
+  const subtitleTracks = await detectSubtitleTracks(file);
+  const extractableSubtitles = subtitleTracks.filter((track) => !track.bitmap).length;
   const playableAudio = audioTracks.filter(isTrackPlayable);
   const skippedCodecs = undecodableCodecs(audioTracks);
   if (!videoTrack && audioTracks.length === 0) {
@@ -152,6 +156,7 @@ export async function probeFile(file: File, reuseId?: string): Promise<ProbeResu
     fps: decodableVideo ? await probeFrameRate(decodableVideo) : undefined,
     hasAudio: playableAudio.length > 0,
     audioTracks,
+    ...(subtitleTracks.length > 0 ? { subtitleTracks } : {}),
     thumbnails: [],
   };
 
@@ -175,12 +180,21 @@ export async function probeFile(file: File, reuseId?: string): Promise<ProbeResu
       videoTrack && !videoDecodable
         ? t('errors.media.videoAudioOnly', { name: file.name, codec: videoTrack.codec ?? '?' })
         : undefined,
-    // Not a problem to report: the track is there and one click away. The card
-    // in the library carries the actual button, so this only points at it.
+    // Not a problem to report: the tracks are there and one click away. The card
+    // in the library carries the actual buttons, so this only points at them.
     notice:
-      skippedCodecs.length > 0
-        ? t('library.audio.detected', { codec: skippedCodecs.join(', ') })
-        : undefined,
+      [
+        skippedCodecs.length > 0
+          ? t('library.audio.detected', { codec: skippedCodecs.join(', ') })
+          : null,
+        // Only the tracks the user can actually act on: a rip whose subtitles
+        // are all PGS has nothing to offer, and the card already explains why.
+        extractableSubtitles > 0
+          ? t('library.subtitles.detected', { count: extractableSubtitles })
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n') || undefined,
   };
 }
 

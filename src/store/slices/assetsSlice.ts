@@ -2,11 +2,9 @@ import type { StoreSet, StoreGet, SliceHelpers } from '../sliceHelpers';
 import type { EditorState } from '../editorState';
 import { audioKey, disposeAssetResources, setTranscodedAudio } from '../../media/mediaCache';
 import { ensureAssetVisuals, probeFile } from '../../media/probe';
-import {
-  TranscodeCanceled,
-  transcodeAudioTrack,
-  type TranscodeProgress,
-} from '../../media/transcodeAudio';
+import { FFmpegCanceled, type FFmpegProgress } from '../../media/ffmpeg';
+import { transcodeAudioTrack } from '../../media/transcodeAudio';
+import { extractSubtitleTrack, subtitleKey } from '../../media/extractSubtitles';
 import { t } from '../../i18n';
 
 /**
@@ -20,7 +18,7 @@ function setProgress(
   set: StoreSet,
   get: StoreGet,
   key: string,
-  progress: TranscodeProgress,
+  progress: FFmpegProgress,
 ): void {
   set({ transcodes: { ...get().transcodes, [key]: progress } });
 }
@@ -45,6 +43,8 @@ export function createAssetsSlice(
   | 'setImporting'
   | 'transcodeAudioTrack'
   | 'cancelTranscode'
+  | 'importSubtitleTrack'
+  | 'cancelSubtitleImport'
 > {
   return {
     addAsset: (asset) => set({ assets: { ...get().assets, [asset.id]: asset } }),
@@ -198,7 +198,7 @@ export function createAssetsSlice(
         // Long enough that the user has almost certainly looked away: say so.
         get().setNotice(t('library.audio.ready', { name: asset.file.name }));
       } catch (err) {
-        if (!(err instanceof TranscodeCanceled)) {
+        if (!(err instanceof FFmpegCanceled)) {
           // The toast says what failed, in the user's terms; the console keeps
           // why. Without this the only symptom of a broken load path was a
           // sentence naming the file, which is not something anyone can act on.
@@ -218,6 +218,56 @@ export function createAssetsSlice(
 
     cancelTranscode: (assetId, audioTrackIndex) => {
       controllers.get(audioKey(assetId, audioTrackIndex))?.abort();
+    },
+
+    importSubtitleTrack: async (assetId, subtitleTrackIndex) => {
+      const asset = get().assets[assetId];
+      const track = asset?.subtitleTracks?.find((tr) => tr.index === subtitleTrackIndex);
+      // A bitmap track has no text to extract: the UI never offers it, and a
+      // command path must not be able to route around that.
+      if (!asset || !track || track.bitmap) return;
+      const key = subtitleKey(assetId, subtitleTrackIndex);
+      if (key in get().transcodes) return;
+
+      const controller = new AbortController();
+      controllers.set(key, controller);
+      setProgress(set, get, key, { phase: 'downloading', ratio: 0 });
+      try {
+        const cues = await extractSubtitleTrack(asset, subtitleTrackIndex, {
+          signal: controller.signal,
+          onProgress: (progress) => setProgress(set, get, key, progress),
+        });
+        // The asset can have been removed (or its file reconnected) during a job
+        // that runs for a while: the cues would belong to a source that is gone.
+        if (get().assets[assetId] !== asset) return;
+        if (cues.length === 0) {
+          get().setError(t('errors.media.noCues', { name: asset.file.name }));
+          return;
+        }
+        // From here on an embedded track is indistinguishable from an imported
+        // .srt: same cues, same parser, same caption track.
+        get().addSubtitleClips(cues);
+        get().setNotice(t('library.subtitles.ready', { count: cues.length }));
+      } catch (err) {
+        if (!(err instanceof FFmpegCanceled)) {
+          // The toast says what failed, in the user's terms; the console keeps
+          // why, since a codec the core cannot handle looks like a plain failure.
+          console.error('subtitle extraction failed', err);
+          get().setError(
+            t('errors.media.subtitleFailed', {
+              name: asset.file.name,
+              codec: track.codec ?? '?',
+            }),
+          );
+        }
+      } finally {
+        controllers.delete(key);
+        clearProgress(set, get, key);
+      }
+    },
+
+    cancelSubtitleImport: (assetId, subtitleTrackIndex) => {
+      controllers.get(subtitleKey(assetId, subtitleTrackIndex))?.abort();
     },
   };
 }

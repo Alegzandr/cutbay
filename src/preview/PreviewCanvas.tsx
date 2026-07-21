@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PlugZap } from 'lucide-react';
 import { PlaybackEngine } from './PlaybackEngine';
@@ -25,6 +25,7 @@ import { clamp } from '../lib/time';
 import { hapticOnSnap, type SnapHapticState } from '../lib/haptics';
 import { PREVIEW_SNAP_THRESHOLD_PX } from '../app/config';
 import {
+  FULL_FRAME_BOUNDS,
   type SnapGuides,
   handlePlacements,
   resizeCursor,
@@ -39,6 +40,7 @@ import {
   PREVIEW_ZOOM_STEP,
   clampView,
   type PreviewView,
+  visibleStageBounds,
   zoomViewAt,
   zoomViewToRect,
 } from './view';
@@ -325,6 +327,7 @@ function PreviewOverlays({
   outW,
   outH,
   stageRef,
+  viewportRef,
   onGuides,
 }: {
   project: Project;
@@ -334,15 +337,39 @@ function PreviewOverlays({
   outW: number;
   outH: number;
   stageRef: RefObject<HTMLDivElement | null>;
+  viewportRef: RefObject<HTMLDivElement | null>;
   /** Publish snap guides up to the stage, which owns the lines' layer. */
   onGuides: (guides: SnapGuides) => void;
 }) {
   const { t } = useTranslation();
   const currentTimeMs = useStore((s) => s.currentTimeMs);
+  const previewView = useStore((s) => s.previewView);
   const resize = useRef<PreviewResize | null>(null);
   const rotate = useRef<PreviewRotate | null>(null);
   /** Live angle readout while rotating - null when no rotation is in flight. */
   const [angleBadge, setAngleBadge] = useState<number | null>(null);
+
+  // How far outside the frame a handle may be painted. Remeasured when the panel
+  // resizes or the camera moves - the two things that change the answer - rather
+  // than on every playback frame, which would mean two forced layouts at 60fps.
+  const [panelTick, setPanelTick] = useState(0);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const stage = stageRef.current;
+    if (!viewport || !stage) return;
+    const ro = new ResizeObserver(() => setPanelTick((n) => n + 1));
+    // The stage too: switching aspect ratio relays it out without the panel
+    // itself ever changing size.
+    ro.observe(viewport);
+    ro.observe(stage);
+    return () => ro.disconnect();
+  }, [viewportRef, stageRef]);
+  const handleBounds = useMemo(() => {
+    const viewport = viewportRef.current;
+    const stage = stageRef.current;
+    if (!viewport || !stage) return FULL_FRAME_BOUNDS;
+    return visibleStageBounds(viewport.getBoundingClientRect(), stage.getBoundingClientRect());
+  }, [previewView, panelTick, viewportRef, stageRef]);
 
   // A media clip visible right now that points at a disconnected source: the
   // canvas would otherwise just render black with no explanation. Plain scan
@@ -510,7 +537,7 @@ function PreviewOverlays({
         <>
           {/* Purely visual: it tilts with the clip and follows it off-frame. The
               handles below are NOT its children, so they can be clamped back
-              into view independently of where the outline runs off to. */}
+              into the panel independently of where the outline runs off to. */}
           <div
             className="pointer-events-none absolute rounded-sm ring-2 ring-sky-400/90"
             style={{
@@ -521,12 +548,12 @@ function PreviewOverlays({
               transform: `rotate(${clipRotation(selectedClip!)}deg)`,
             }}
           />
-          {handlePlacements(selectedRect, clipRotation(selectedClip!), outW, outH).map((h) => (
+          {handlePlacements(selectedRect, clipRotation(selectedClip!), outW, outH, handleBounds).map((h) => (
             <div key={h.corner} className="pointer-events-none absolute" style={{ left: `${h.x * 100}%`, top: `${h.y * 100}%` }}>
               {/* Rotation zone: just OUTSIDE the corner, where every editor puts
                   it (Figma, Premiere, Canva) - no extra chrome crowding an
                   already narrow 9:16 frame. Once the corner has been pulled back
-                  to the frame border there is no "outside" left, so it flips to
+                  to the panel edge there is no "outside" left, so it flips to
                   the inner side of the handle instead of leaving the panel. */}
               <div
                 className="pointer-events-auto absolute h-6 w-6 touch-none"
@@ -1058,6 +1085,7 @@ export function PreviewCanvas() {
           outW={outW}
           outH={outH}
           stageRef={stageRef}
+          viewportRef={viewportRef}
           onGuides={publishGuides}
         />
       </div>

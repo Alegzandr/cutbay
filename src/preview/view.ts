@@ -1,4 +1,5 @@
 import { clamp } from '../lib/time';
+import { FULL_FRAME_BOUNDS, type HandleBounds } from './transformSnap';
 
 /**
  * Which pointer gesture the preview stage answers to.
@@ -60,6 +61,36 @@ export function clampView(view: PreviewView, viewport: DOMRect, stageW: number, 
   const maxX = Math.max(viewport.width / 2, (stageW * zoom - viewport.width) / 2);
   const maxY = Math.max(viewport.height / 2, (stageH * zoom - viewport.height) / 2);
   return { zoom, x: clamp(view.x, -maxX, maxX), y: clamp(view.y, -maxY, maxY) };
+}
+
+/** Margin kept between a clamped handle and the panel edge, in CSS px. */
+const HANDLE_EDGE_INSET_PX = 10;
+
+/**
+ * The slice of the stage that is actually on screen, in normalized stage coords
+ * (the same units the overlays are positioned in). Values fall outside 0..1
+ * whenever the panel is larger than the output frame - which is the common case,
+ * and exactly the room the corner handles need to follow a clip that overflows
+ * the frame instead of being pinned to its border.
+ *
+ * Both rects are read live because the stage's is the *transformed* one: it
+ * already carries the camera zoom and pan.
+ */
+export function visibleStageBounds(
+  viewport: DOMRect,
+  stage: DOMRect,
+  insetPx = HANDLE_EDGE_INSET_PX,
+): HandleBounds {
+  if (stage.width <= 0 || stage.height <= 0) return FULL_FRAME_BOUNDS;
+  // A viewport narrower than twice the inset would invert the bounds; falling
+  // back to the frame keeps the handles somewhere sane.
+  if (viewport.width <= insetPx * 2 || viewport.height <= insetPx * 2) return FULL_FRAME_BOUNDS;
+  return {
+    minX: (viewport.left + insetPx - stage.left) / stage.width,
+    maxX: (viewport.right - insetPx - stage.left) / stage.width,
+    minY: (viewport.top + insetPx - stage.top) / stage.height,
+    maxY: (viewport.bottom - insetPx - stage.top) / stage.height,
+  };
 }
 
 /**

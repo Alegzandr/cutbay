@@ -1,4 +1,4 @@
-import type { AudioTrackInfo, MediaAsset, Project } from '../types';
+import type { AudioTrackInfo, MediaAsset, Project, SubtitleTrackInfo } from '../types';
 import { APP_NAME, APP_VERSION } from '../app/config';
 import { isValidProject } from './persistence';
 import { missingSourceFile } from './missingSource';
@@ -41,6 +41,7 @@ interface StoredAsset {
   fps?: number;
   hasAudio: boolean;
   audioTracks: AudioTrackInfo[];
+  subtitleTracks?: SubtitleTrackInfo[];
   thumbnails: string[];
   source: AssetSource;
 }
@@ -66,6 +67,10 @@ function toStored(asset: MediaAsset): StoredAsset {
     ...(fps !== undefined ? { fps } : {}),
     hasAudio,
     audioTracks,
+    // Detected from the file header, so re-derivable - but a reopened project
+    // whose sources are disconnected cannot re-read them, and the card would
+    // silently lose tracks it listed before the save.
+    ...(asset.subtitleTracks?.length ? { subtitleTracks: asset.subtitleTracks } : {}),
     thumbnails,
     source: {
       name: asset.file.name,

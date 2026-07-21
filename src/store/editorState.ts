@@ -11,7 +11,7 @@ import type { TimeFormat } from '../lib/time';
 import type { PreviewResolutionMode } from '../app/config';
 import type { PreviewTool, PreviewView } from '../preview/view';
 import type { SubtitleCue } from '../lib/subtitles';
-import type { TranscodeProgress } from '../media/transcodeAudio';
+import type { FFmpegProgress } from '../media/ffmpeg';
 
 /** Panes of the inspector column. */
 export type InspectorTab = 'clip' | 'subtitles';
@@ -160,11 +160,12 @@ export interface EditorState {
   exportOpen: boolean;
   importing: boolean;
   /**
-   * Running audio conversions, keyed by `audioKey(assetId, trackIndex)`, holding
-   * the current phase and its progress. An entry exists only while the job runs,
-   * so the UI reads presence as "in progress".
+   * Running ffmpeg jobs, keyed by `audioKey(assetId, trackIndex)` for an audio
+   * conversion and `subtitleKey(...)` for a subtitle extraction, holding the
+   * current phase and its progress. An entry exists only while the job runs, so
+   * the UI reads presence as "in progress".
    */
-  transcodes: Record<string, TranscodeProgress>;
+  transcodes: Record<string, FFmpegProgress>;
   error: string | null;
   /** Transient confirmation ("Project saved"), shown in the same slot as `error`. */
   notice: string | null;
@@ -209,6 +210,15 @@ export interface EditorState {
   transcodeAudioTrack: (assetId: string, audioTrackIndex: number) => Promise<void>;
   /** Abort a running transcode (the partial result is discarded). */
   cancelTranscode: (assetId: string, audioTrackIndex: number) => void;
+  /**
+   * Extract one subtitle track embedded in a source file through ffmpeg.wasm and
+   * lay its cues down as caption clips, exactly as importing a .srt would. Same
+   * contract as a transcode: long, explicitly user-triggered, progress published
+   * in `transcodes`, and a second call for a running track is a no-op.
+   */
+  importSubtitleTrack: (assetId: string, subtitleTrackIndex: number) => Promise<void>;
+  /** Abort a running subtitle extraction (nothing is laid down). */
+  cancelSubtitleImport: (assetId: string, subtitleTrackIndex: number) => void;
   /**
    * Give every already-placed picture clip of an asset the audio lane for a
    * track that just became playable (right after a transcode). Clips dropped

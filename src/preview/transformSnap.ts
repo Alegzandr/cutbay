@@ -152,25 +152,39 @@ export interface HandlePlacement {
   clamped: boolean;
 }
 
+/** Where handles may be painted, in normalized stage coords. */
+export interface HandleBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+/** The output frame itself - the fallback when the visible area is unknown. */
+export const FULL_FRAME_BOUNDS: HandleBounds = { minX: 0, maxX: 1, minY: 0, maxY: 1 };
+
 /**
  * Where the four corner handles go.
  *
- * They cannot simply ride along inside the selection outline: scale a landscape
+ * They sit on the clip's own corners, which is where a resize handle is
+ * expected to be. But they cannot ride along unconditionally: scale a landscape
  * clip up to "cover" in a portrait project - the whole point of the magnetism
- * above - and all four corners land outside the frame, where the preview panel
- * clips them away. The handles were then unreachable at exactly the scale the
- * edit is meant to end up at, so the clip could no longer be resized at all.
+ * above - and all four corners land far outside the panel, where they are
+ * unreachable at exactly the scale the edit is meant to end up at.
  *
- * So each corner is rotated around the clip's centre, then clamped into the
- * frame. A clip that fits is untouched; one that overflows keeps its handles on
- * the frame border, still grabbable. The gesture math is unaffected: it works
- * from the clip's true rect and the pointer, never from these positions.
+ * So each corner is rotated around the clip's centre, then clamped into
+ * `bounds` - the area actually visible in the preview panel, which extends well
+ * past the output frame (the letterbox around it shows the overflowing media).
+ * Only a corner that has truly left the panel gets pulled back. The gesture math
+ * is unaffected: it works from the clip's true rect and the pointer, never from
+ * these positions.
  */
 export function handlePlacements(
   rect: DestRect,
   rotationDeg: number,
   outW: number,
   outH: number,
+  bounds: HandleBounds = FULL_FRAME_BOUNDS,
 ): HandlePlacement[] {
   const cx = rect.dx + rect.dw / 2;
   const cy = rect.dy + rect.dh / 2;
@@ -189,8 +203,8 @@ export function handlePlacements(
 
     const nx = (cx + rx) / outW;
     const ny = (cy + ry) / outH;
-    const x = clamp(nx, 0, 1);
-    const y = clamp(ny, 0, 1);
+    const x = clamp(nx, bounds.minX, bounds.maxX);
+    const y = clamp(ny, bounds.minY, bounds.maxY);
     return { corner, x, y, dirX: rx / len, dirY: ry / len, clamped: x !== nx || y !== ny };
   });
 }

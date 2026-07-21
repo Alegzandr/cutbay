@@ -155,6 +155,17 @@ describe('handlePlacements', () => {
     }
   });
 
+  it('lets the corners leave the frame when the panel still shows them', () => {
+    // A panel twice as wide as the 9:16 frame: the clip's own left/right edges
+    // are on screen, so the handles belong there and not on the frame border.
+    const bounds = { minX: -0.5, maxX: 1.5, minY: 0, maxY: 1 };
+    const wide = { dx: -540, dy: 660, dw: 2160, dh: 600 };
+    const hs = handlePlacements(wide, 0, OUT.outW, OUT.outH, bounds);
+    const nw = hs.find((h) => h.corner === 'nw')!;
+    expect(nw.clamped).toBe(false);
+    expect(nw.x).toBeCloseTo(-0.5, 10);
+  });
+
   it('follows the rotation: a quarter turn sends NW where NE was', () => {
     const hs = handlePlacements(inside, 90, OUT.outW, OUT.outH);
     const nw = hs.find((h) => h.corner === 'nw')!;

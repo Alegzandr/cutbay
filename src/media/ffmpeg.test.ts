@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { fetchToBlobURL } from './transcodeAudio';
+import { fetchToBlobURL } from './ffmpeg';
 
 /**
  * Regression guard on the core download.

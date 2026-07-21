@@ -81,6 +81,35 @@ export interface AudioTrackInfo {
 }
 
 /**
+ * One subtitle track embedded in a source file (an episode MKV routinely carries
+ * several: full, forced, SDH, one per language).
+ *
+ * Detected by reading the container header, never by decoding: the entry exists
+ * so the UI can offer the track, and the cues are only extracted once the user
+ * picks one. `index` is the position among the file's SUBTITLE tracks, which is
+ * what ffmpeg's `0:s:<n>` selects.
+ */
+export interface SubtitleTrackInfo {
+  index: number;
+  /** Language code the container states ('und' filtered out), when it states one. */
+  language?: string;
+  /** Container-provided track name ("Forced", "SDH"…), when present. */
+  label?: string;
+  /** Container codec id ('S_TEXT/UTF8', 'tx3g'…), kept to name the format in the UI. */
+  codec?: string;
+  /**
+   * The track holds pictures, not text (PGS and VobSub, i.e. most disc rips).
+   * It is listed anyway - the user should learn the subtitles exist and why they
+   * cannot come in - but it can never become caption clips without OCR.
+   */
+  bitmap?: true;
+  /** The container marks this track as the one to show by default. */
+  default?: true;
+  /** The container marks this track as forced (signs and foreign dialogue only). */
+  forced?: true;
+}
+
+/**
  * Whether a track can actually be heard right now: natively decodable, or an
  * undecodable one the user has already transcoded this session. The mix, the
  * export and the timeline all gate on this so they never disagree.
@@ -117,6 +146,12 @@ export interface MediaAsset {
    * silent video. A pure-audio asset has exactly one entry.
    */
   audioTracks: AudioTrackInfo[];
+  /**
+   * Subtitle tracks the container carries, in file order. Optional because it is
+   * absent from assets persisted before embedded subtitles were supported, and
+   * empty for the overwhelming majority of sources.
+   */
+  subtitleTracks?: SubtitleTrackInfo[];
   /** Thumbnails (data URLs) spread across the duration, used to paint video clips. */
   thumbnails: string[];
   /**
