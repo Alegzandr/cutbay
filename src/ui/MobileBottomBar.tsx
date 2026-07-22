@@ -46,7 +46,9 @@ const TOOL_TILES: readonly Tile[] = [
   { cmd: 'insert.audioTrack', labelKey: 'mobile.audio' },
   { cmd: 'insert.videoTrack', labelKey: 'mobile.video' },
   { cmd: 'insert.marker', labelKey: 'mobile.marker' },
-  // Touch has no menu bar: preferences (language, time format) need a tile.
+  // Touch has no menu bar, so the two File actions it cannot live without get a
+  // tile: importing a preset here, and preferences (language, time format).
+  { cmd: 'file.importPreset', labelKey: 'mobile.preset' },
   { cmd: 'edit.preferences', labelKey: 'mobile.settings' },
 ];
 

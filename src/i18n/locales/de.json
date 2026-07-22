@@ -549,7 +549,7 @@
   "errors.preset.saveFailed": "Das Preset konnte nicht gespeichert werden.",
   "errors.preset.empty": "Dieser Clip hat keine Effekte zum Speichern.",
   "library.effects.presets": "Meine Presets",
-  "library.presets.import": "Preset importieren…",
+  "mobile.preset": "Preset",
   "library.presets.empty": "Importierte Presets bleiben bis zum Ende dieser Sitzung hier.",
   "library.presets.remove": "Aus dieser Sitzung entfernen"
 }

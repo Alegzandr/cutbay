@@ -549,7 +549,7 @@
   "errors.preset.saveFailed": "The preset could not be saved.",
   "errors.preset.empty": "This clip has no effects to save.",
   "library.effects.presets": "My presets",
-  "library.presets.import": "Import preset…",
+  "mobile.preset": "Preset",
   "library.presets.empty": "Imported presets stay here for the rest of this session.",
   "library.presets.remove": "Remove from this session"
 }
