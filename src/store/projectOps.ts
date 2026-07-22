@@ -151,6 +151,19 @@ export function linkedPartnerIds(project: Project, clipId: string): string[] {
   return out;
 }
 
+/**
+ * The linked partners that share `clipId`'s SOURCE geometry, i.e. every partner
+ * except caption/text clips. Trim and slip re-aim a clip into its media, an
+ * edit a text clip has no source to absorb: subtitles linked to their footage
+ * must follow its moves and deletes, but keep their own cue timings when the
+ * shot is trimmed.
+ */
+export function sourceLinkedIds(project: Project, clipId: string): string[] {
+  return linkedPartnerIds(project, clipId).filter(
+    (id) => findClip(project, id)?.clip.kind !== 'text',
+  );
+}
+
 /** Expand a set of clip ids to also include every A/V-linked partner. */
 export function withLinkedIds(project: Project, clipIds: Iterable<string>): string[] {
   const set = new Set<string>();

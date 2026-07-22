@@ -28,6 +28,8 @@ import { subtitleKey } from '../media/extractSubtitles';
 import { JobProgress } from './JobProgress';
 import { TrackPickerDialog, type PickerTrack } from './TrackPickerDialog';
 import { useImport } from './useImport';
+import { EffectsPane, TransitionsPane } from './EffectLibrary';
+import type { LibraryTab } from '../store/editorState';
 
 /**
  * Source explorer: every imported file lands here. From here assets are
@@ -35,52 +37,85 @@ import { useImport } from './useImport';
  * (which also removes their clips). Desktop: docked column. Mobile: a
  * drawer (screen space goes to the preview and the timeline).
  */
+/**
+ * Tab strip of the library column. `media` is the project's source bin; the
+ * other two are the effect and transition catalogues, docked here the way a
+ * desktop NLE docks them rather than buried in the per-clip inspector.
+ */
+function LibraryTabs() {
+  const { t } = useTranslation();
+  const coarse = useIsCoarsePointer();
+  const tab = useStore((s) => s.libraryTab);
+  const tabs: { id: LibraryTab; label: string }[] = [
+    { id: 'media', label: t('library.tab.media') },
+    { id: 'effects', label: t('library.tab.effects') },
+    { id: 'transitions', label: t('library.tab.transitions') },
+  ];
+  return (
+    <div className="flex h-8 flex-none items-center gap-0.5 border-b border-zinc-800 px-1">
+      {tabs.map(({ id, label }) => (
+        <button
+          key={id}
+          // min-w-0 + truncate: the column narrows to 160px and the labels are
+          // translated, so a long word must shrink rather than push the strip.
+          className={`min-w-0 flex-1 truncate rounded px-1.5 py-1 text-2xs font-medium ${
+            tab === id ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
+          }`}
+          onClick={() => useStore.getState().setLibraryTab(id)}
+          aria-current={tab === id}
+          title={label}
+        >
+          {label}
+        </button>
+      ))}
+      {coarse && (
+        <button
+          className="touch-hit flex-none rounded p-1 text-zinc-400 hover:bg-zinc-800/70 active:bg-zinc-800 pointer-coarse:p-2"
+          onClick={() => useStore.getState().setLibraryOpen(false)}
+          title={t('library.close')}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function MediaLibrary() {
   const { t } = useTranslation();
   const assets = useStore((s) => s.assets);
   const coarse = useIsCoarsePointer();
+  const tab = useStore((s) => s.libraryTab);
   const libraryOpen = useStore((s) => s.libraryOpen);
   const libraryWidthPx = useStore((s) => s.libraryWidthPx);
   const importFiles = useImport();
   const list = Object.values(assets);
   const importHere = () => openMediaPicker(importFiles);
 
-  const body = (
+  const mediaPane = (
     <>
-      <div className="flex h-8 flex-none items-center gap-1.5 border-b border-zinc-800 px-2 text-2xs font-semibold uppercase tracking-wide text-zinc-400">
+      <div className="flex h-7 flex-none items-center gap-1.5 px-2 text-2xs font-semibold uppercase tracking-wide text-zinc-400">
         <FolderOpen className="h-3.5 w-3.5" />
-        {t('library.title')}
         {/* Bare count badge: no unit to translate, but it needs a spoken label. */}
-        <div className="ml-auto flex items-center gap-0.5">
-          {list.length > 0 && (
-            <span
-              className="font-normal text-zinc-400"
-              aria-label={t('library.count', { count: list.length })}
-            >
-              {list.length}
-            </span>
-          )}
-          {/* Always reachable: once the library holds assets, this is the only
-              import entry point in reach - the timeline dropzone is gone. */}
-          <Tooltip label={t('library.import')}>
-            <button
-              className="touch-hit rounded bg-sky-500/15 p-1 text-sky-300 hover:bg-sky-500/25 active:bg-sky-500/30 pointer-coarse:p-2"
-              onClick={importHere}
-              aria-label={t('library.import')}
-            >
-              <Import className="h-3.5 w-3.5" />
-            </button>
-          </Tooltip>
-          {coarse && (
-            <button
-              className="touch-hit -mr-1 rounded p-1 text-zinc-400 hover:bg-zinc-800/70 active:bg-zinc-800 pointer-coarse:p-2"
-              onClick={() => useStore.getState().setLibraryOpen(false)}
-              title={t('library.close')}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
+        {list.length > 0 && (
+          <span
+            className="font-normal text-zinc-400"
+            aria-label={t('library.count', { count: list.length })}
+          >
+            {list.length}
+          </span>
+        )}
+        {/* Always reachable: once the library holds assets, this is the only
+            import entry point in reach - the timeline dropzone is gone. */}
+        <Tooltip label={t('library.import')}>
+          <button
+            className="touch-hit ml-auto rounded bg-sky-500/15 p-1 text-sky-300 hover:bg-sky-500/25 active:bg-sky-500/30 pointer-coarse:p-2"
+            onClick={importHere}
+            aria-label={t('library.import')}
+          >
+            <Import className="h-3.5 w-3.5" />
+          </button>
+        </Tooltip>
       </div>
 
       {list.length === 0 ? (
@@ -96,6 +131,13 @@ export function MediaLibrary() {
           ))}
         </div>
       )}
+    </>
+  );
+
+  const body = (
+    <>
+      <LibraryTabs />
+      {tab === 'media' ? mediaPane : tab === 'effects' ? <EffectsPane /> : <TransitionsPane />}
     </>
   );
 
@@ -135,7 +177,10 @@ export function MediaLibrary() {
             animate={{ x: 0 }}
             exit={{ x: '-105%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 380 }}
-            className="fixed inset-y-0 left-0 z-40 flex w-44 flex-col border-r border-zinc-800 bg-zinc-900 pt-[env(safe-area-inset-top)] shadow-2xl shadow-black"
+            // w-64, not the w-44 this drawer used to be: it now carries a
+            // three-tab strip plus the close button, and anything narrower
+            // truncates the longest label ("Transitions") mid-word.
+            className="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-zinc-800 bg-zinc-900 pt-[env(safe-area-inset-top)] shadow-2xl shadow-black"
           >
             {body}
           </motion.aside>

@@ -40,6 +40,8 @@ import { createAssetsSlice } from './slices/assetsSlice';
 import { createSelectionSlice } from './slices/selectionSlice';
 import { createPlaybackSlice } from './slices/playbackSlice';
 import { createClipsSlice } from './slices/clipsSlice';
+import { createKeyframesSlice } from './slices/keyframesSlice';
+import { createEffectsSlice } from './slices/effectsSlice';
 import { createTracksSlice } from './slices/tracksSlice';
 import { createMarkersSlice } from './slices/markersSlice';
 import { createHistorySlice } from './slices/historySlice';
@@ -146,7 +148,7 @@ export const useStore = create<EditorState>((set, get) => {
     });
   };
 
-  /** Drop any selected ids whose clip no longer exists. */
+  /** Drop any selected ids - clips and boxed keyframes - whose clip is gone. */
   const pruneSelection = () => {
     const live = new Set<string>();
     for (const t of get().project.tracks) for (const c of t.clips) live.add(c.id);
@@ -158,6 +160,10 @@ export const useStore = create<EditorState>((set, get) => {
         ...(ids.length === 0 ? { inspectorOpen: false } : {}),
       });
     }
+    const keys = get().selectedKeyframes;
+    if (keys.some((k) => !live.has(k.clipId))) {
+      set({ selectedKeyframes: keys.filter((k) => live.has(k.clipId)) });
+    }
   };
 
   const helpers = { withHistory, pruneSelection };
@@ -167,6 +173,7 @@ export const useStore = create<EditorState>((set, get) => {
     assets: {},
     selectedClipId: null,
     selectedClipIds: [],
+    selectedKeyframes: [],
     currentTimeMs: 0,
     seekVersion: 0,
     playing: false,
@@ -181,6 +188,7 @@ export const useStore = create<EditorState>((set, get) => {
     inspectorOpen: false,
     inspectorTab: 'clip',
     libraryOpen: false,
+    libraryTab: 'media',
     shortcutsOpen: false,
     preferencesOpen: false,
     aboutOpen: false,
@@ -231,6 +239,8 @@ export const useStore = create<EditorState>((set, get) => {
     ...createSelectionSlice(set, get, helpers),
     ...createPlaybackSlice(set, get, helpers),
     ...createClipsSlice(set, get, helpers),
+    ...createKeyframesSlice(set, get, helpers),
+    ...createEffectsSlice(set, get, helpers),
     ...createTracksSlice(set, get, helpers),
     ...createMarkersSlice(set, get, helpers),
     ...createHistorySlice(set, get, helpers),

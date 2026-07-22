@@ -63,6 +63,17 @@ export const DEFAULT_PREVIEW_RESOLUTION: PreviewResolutionMode = 'half';
 
 /** DataTransfer type used to drag an asset from the media library to the timeline. */
 export const ASSET_DRAG_MIME = 'application/x-selfcut-asset';
+/** DataTransfer type used to drag an effect preset from the library onto a clip. */
+export const EFFECT_DRAG_MIME = 'application/x-selfcut-effect';
+/** DataTransfer type used to drag a transition from the library onto a clip. */
+export const TRANSITION_DRAG_MIME = 'application/x-selfcut-transition';
+/**
+ * Overlap a transition creates when dropped on a clip that does not yet have
+ * one. Transitions are rendered purely from clip overlap (Vegas-style), so
+ * dropping a style on a butt cut has to slide the clips together first, or the
+ * choice would be silently inert.
+ */
+export const DEFAULT_CROSSFADE_MS = 500;
 
 /** Timeline geometry. */
 export const TRACK_HEIGHT_PX = 64;

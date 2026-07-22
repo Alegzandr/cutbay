@@ -29,6 +29,9 @@ export function createSelectionSlice(
       set({
         selectedClipId: ids[0] ?? null,
         selectedClipIds: ids,
+        // A plain click is a fresh start: the boxed keyframes go with it. The
+        // marquee sets both sets itself, so it never routes through here.
+        selectedKeyframes: [],
         // Crop-edit mode is bound to one clip; any selection change ends it.
         cropEditing: false,
         ...(ids.length === 0 ? { inspectorOpen: false } : {}),

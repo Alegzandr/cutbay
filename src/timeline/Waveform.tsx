@@ -6,7 +6,7 @@ import { useTimelineViewport } from './viewport';
 interface Props {
   asset: MediaAsset;
   clip: Clip;
-  /** On-screen width of the clip in px (canvas resolution is capped, CSS stretches). */
+  /** On-screen width of the clip in CSS px. */
   widthPx: number;
   /** Content-x of the clip's left edge, to intersect the waveform with the viewport. */
   clipLeftPx: number;
@@ -38,9 +38,13 @@ export const Waveform = memo(function Waveform({ asset, clip, widthPx, clipLeftP
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !peaks?.length || !visible) return;
-    // Full-resolution canvas (one bar per screen pixel) - a CSS-stretched
-    // low-res canvas reads as a blurry blob, not a waveform.
-    const w = Math.max(16, Math.min(30000, Math.round(sliceW)));
+    // One bar per PHYSICAL pixel - a CSS-stretched low-res canvas reads as a
+    // blurry blob, and sizing the backing store in CSS px leaves the browser
+    // upscaling by the device ratio, which is the same blur one step later.
+    // Only the width is scaled: the height stays a fixed backing size that CSS
+    // stretches to the lane, since a full-height bar has nothing to blur.
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    const w = Math.max(16, Math.min(30000, Math.round(sliceW * dpr)));
     const h = 64;
     canvas.width = w;
     canvas.height = h;
@@ -49,6 +53,13 @@ export const Waveform = memo(function Waveform({ asset, clip, widthPx, clipLeftP
     ctx.fillStyle = color;
     const spanMs = sourceOutMs - sourceInMs;
     const durMs = spanMs / speed;
+    // How many peak bins one bar spans, which decides how the envelope is
+    // sampled: zoomed in, bars are narrower than a bin and must interpolate
+    // (reading the nearest bin repeats one height across many bars, drawing
+    // flat blocks); zoomed out, a bar covers many bins and must take their max
+    // (reading one bin drops the loudest content and flickers while scrolling).
+    const binsPerBar = widthPx > 0 ? ((spanMs / durationMs) * peaks.length * (sliceW / w)) / widthPx : 0;
+    const half = binsPerBar / 2;
     for (let x = 0; x < w; x++) {
       // Fraction along the WHOLE clip (not just the drawn slice) so the sampled
       // source frame and the fade envelope stay correct when only a slice shows.
@@ -56,13 +67,27 @@ export const Waveform = memo(function Waveform({ asset, clip, widthPx, clipLeftP
       // along the timeline never triggers a repaint.
       const t = widthPx > 0 ? (localStart + ((x + 0.5) / w) * sliceW) / widthPx : 0;
       const srcMs = sourceInMs + t * spanMs;
-      const idx = Math.min(peaks.length - 1, Math.max(0, Math.floor((srcMs / durationMs) * peaks.length)));
+      // Continuous bin position; bin i is centered at i + 0.5.
+      const center = (srcMs / durationMs) * peaks.length;
+      let peak: number;
+      if (binsPerBar >= 2) {
+        const from = Math.max(0, Math.floor(center - half));
+        const to = Math.min(peaks.length, Math.ceil(center + half));
+        peak = 0;
+        for (let i = from; i < to; i++) if (peaks[i]! > peak) peak = peaks[i]!;
+      } else {
+        const f = center - 0.5;
+        const i0 = Math.min(peaks.length - 1, Math.max(0, Math.floor(f)));
+        const i1 = Math.min(peaks.length - 1, i0 + 1);
+        const frac = Math.min(1, Math.max(0, f - i0));
+        peak = peaks[i0]! * (1 - frac) + peaks[i1]! * frac;
+      }
       const localMs = t * durMs;
       let fade = 1;
       if (fadeInMs > 0) fade = Math.min(fade, localMs / fadeInMs);
       if (fadeOutMs > 0) fade = Math.min(fade, (durMs - localMs) / fadeOutMs);
       const gain = volume * Math.max(0, Math.min(1, fade));
-      const bar = Math.max(2, peaks[idx]! * gain * h);
+      const bar = Math.max(2, peak * gain * h);
       ctx.fillRect(x, (h - bar) / 2, 1, bar);
     }
   }, [

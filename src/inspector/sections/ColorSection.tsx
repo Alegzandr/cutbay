@@ -16,16 +16,6 @@ const PARAMS: { key: keyof ClipColor; min: number; max: number }[] = [
   { key: 'blur', min: 0, max: 1 },
 ];
 
-/** One-tap looks: each populates the colour params with a preset grade. */
-type FilterName = 'bw' | 'warm' | 'cool' | 'vintage' | 'vivid';
-const FILTERS: { name: FilterName; color: ClipColor }[] = [
-  { name: 'bw', color: { saturation: -1 } },
-  { name: 'warm', color: { temperature: 0.4, saturation: 0.1 } },
-  { name: 'cool', color: { temperature: -0.4 } },
-  { name: 'vintage', color: { temperature: 0.25, contrast: -0.15, saturation: -0.2, vignette: 0.4 } },
-  { name: 'vivid', color: { saturation: 0.4, contrast: 0.15 } },
-];
-
 /** Current value of a colour channel as a plain number (constant until keyframed). */
 function value(ch: Channel | undefined): number {
   return ch === undefined ? 0 : sampleChannel(ch, 0);
@@ -34,6 +24,10 @@ function value(ch: Channel | undefined): number {
 /**
  * Colour grading ("Adjust"): brightness, contrast, saturation, white balance and
  * vignette, run through the WebGL colour pass. Shown for video and image clips.
+ *
+ * Parameters only. The one-tap looks (B&W, Warm, Vintage…) that used to head
+ * this section are the library's Effects tab now: the catalogue is where you
+ * pick a grade, the inspector is where you tune the one you picked.
  */
 export function ColorSection({ clip }: { clip: Clip }) {
   const { t } = useTranslation();
@@ -56,21 +50,6 @@ export function ColorSection({ clip }: { clip: Clip }) {
           <RotateCcw className="h-3 w-3" />
           {t('inspector.reset')}
         </button>
-      </div>
-      {/* One-tap filters: preconfigured looks, keeping any blur already set. */}
-      <div className="flex flex-wrap gap-1.5">
-        {FILTERS.map((f) => (
-          <button
-            key={f.name}
-            type="button"
-            onClick={() =>
-              updateClipCommitted(clip.id, { color: { ...f.color, blur: color?.blur } })
-            }
-            className="touch-hit rounded bg-zinc-800 px-2 py-1 text-2xs font-medium text-zinc-300 hover:bg-zinc-700/60 active:bg-zinc-700"
-          >
-            {t(`inspector.filters.${f.name}`)}
-          </button>
-        ))}
       </div>
       {PARAMS.map(({ key, min, max }) => (
         <SliderRow

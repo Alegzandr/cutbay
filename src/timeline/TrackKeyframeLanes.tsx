@@ -2,44 +2,34 @@
  * Per-property keyframe lanes shown under a track when it is expanded - one
  * thin strip per animatable property, the diamonds of every clip on the track
  * laid out on it in timeline time. Click a diamond to seek the playhead onto
- * it; drag one to retime the whole keyframe column at that time (matching the
- * aggregate lane on the selected clip), the Adobe reflex of reading and
- * scrubbing an animation curve by its keys. An empty lane still shows: it
- * says "this property could be keyframed" instead of hiding until the first
- * key exists, which would make the row jump under the pointer mid-edit.
+ * it, Ctrl/Cmd+click to add it to the selection, or box a set of them by
+ * dragging a rectangle over the lanes - the Adobe reflex of reading and
+ * scrubbing an animation curve by its keys. Dragging any selected diamond
+ * slides the whole set, relative spacing intact.
+ *
+ * Unlike the aggregate lane on the selected clip, a drag here retimes only the
+ * selected keys, not every property that happens to share their time: these
+ * lanes exist precisely to edit one property apart from the others.
+ *
+ * An empty lane still shows: it says "this property could be keyframed" instead
+ * of hiding until the first key exists, which would make the row jump under the
+ * pointer mid-edit.
  */
 import { memo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AnimatableProp, Clip, Track } from '../types';
+import { AnimatableProp, Clip, KeyframeRef, Track } from '../types';
 import { useStore } from '../store/store';
 import { formatTime } from '../lib/time';
-import { clipDurationMs } from '../model';
 import { EXPANDED_TRACK_PROPS, KEYFRAME_LANE_HEIGHT_PX, KEYFRAME_LANES_GAP_PX } from './trackHeight';
-
-/**
- * Bounds a keyframe at clip-local `time` may be dragged between: its
- * neighbours across every property that has a key there. Mirrors
- * `ClipKeyframes` so a diamond drag in either lane obeys the same collision
- * rules the retime action would enforce anyway.
- */
-function dragBounds(clip: Clip, time: number): [number, number] {
-  let lo = 0;
-  let hi = clipDurationMs(clip);
-  for (const keys of Object.values(clip.animation ?? {})) {
-    if (!keys) continue;
-    const idx = keys.findIndex((k) => Math.abs(k.t - time) < 1);
-    if (idx < 0) continue;
-    if (idx > 0) lo = Math.max(lo, keys[idx - 1]!.t + 1);
-    if (idx < keys.length - 1) hi = Math.min(hi, keys[idx + 1]!.t - 1);
-  }
-  return [lo, hi];
-}
+import { keyframeKey, keyframeKeySet, selectionDragBounds } from './keyframeSelection';
 
 interface Drag {
-  clipId: string;
+  /** The pressed diamond, for the click-without-move case. */
+  ref: KeyframeRef;
   startX: number;
-  origT: number;
-  curT: number;
+  /** Delta already committed to the store, so each move sends the difference. */
+  appliedMs: number;
+  /** Bounds of the whole selection, as a delta range around its start. */
   lo: number;
   hi: number;
   moved: boolean;
@@ -61,32 +51,43 @@ export const TrackKeyframeLanes = memo(function TrackKeyframeLanes({
 }) {
   const { t } = useTranslation();
   const padLeft = useStore((s) => s.timelinePadLeft);
+  const selectedKeyframes = useStore((s) => s.selectedKeyframes);
+  const selectedKeys = keyframeKeySet(selectedKeyframes);
   const drag = useRef<Drag | null>(null);
 
-  const onDown = (e: React.PointerEvent, clip: Clip, time: number) => {
+  const onDown = (e: React.PointerEvent, clip: Clip, prop: AnimatableProp, time: number) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    const [lo, hi] = dragBounds(clip, time);
-    useStore.getState().beginGesture();
-    drag.current = {
-      clipId: clip.id,
-      startX: e.clientX,
-      origT: time,
-      curT: time,
-      lo,
-      hi,
-      moved: false,
-    };
+    const state = useStore.getState();
+    const ref: KeyframeRef = { clipId: clip.id, prop, t: time };
+    // Ctrl/Cmd+click adds or removes one diamond from the box-selection without
+    // starting a drag - the same reflex as Ctrl+click on a clip.
+    if (e.ctrlKey || e.metaKey) {
+      const key = keyframeKey(ref);
+      state.setSelectedKeyframes(
+        selectedKeys.has(key)
+          ? selectedKeyframes.filter((k) => keyframeKey(k) !== key)
+          : [...selectedKeyframes, ref],
+      );
+      return;
+    }
+    // Pressing a diamond outside the selection makes it the selection; pressing
+    // one inside keeps the set, so a box-select can be dragged as a block.
+    const dragging = selectedKeys.has(keyframeKey(ref)) ? selectedKeyframes : [ref];
+    if (dragging.length === 1) state.setSelectedKeyframes(dragging);
+    const [lo, hi] = selectionDragBounds(state.project, dragging);
+    state.beginGesture();
+    drag.current = { ref, startX: e.clientX, appliedMs: 0, lo, hi, moved: false };
   };
   const onMove = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d) return;
     if (!d.moved && Math.abs(e.clientX - d.startX) < 4) return;
     d.moved = true;
-    const newT = Math.max(d.lo, Math.min(d.hi, d.origT + (e.clientX - d.startX) / pxPerMs));
-    useStore.getState().moveClipKeyframes(d.clipId, d.curT, newT);
-    d.curT = newT;
+    const target = Math.max(d.lo, Math.min(d.hi, (e.clientX - d.startX) / pxPerMs));
+    useStore.getState().moveSelectedKeyframes(target - d.appliedMs);
+    d.appliedMs = target;
   };
   const onUp = () => {
     const d = drag.current;
@@ -95,12 +96,14 @@ export const TrackKeyframeLanes = memo(function TrackKeyframeLanes({
     state.endGesture();
     // A press that never moved is a click: seek onto that key and select its clip,
     // so the inspector's easing picker and the keyframe diamonds in the clip
-    // lane both pop up on the same gesture.
+    // lane both pop up on the same gesture. `selectClip` clears the keyframe
+    // box-selection, so the pressed diamond is re-selected after it.
     if (!d.moved) {
-      const clip = track.clips.find((c) => c.id === d.clipId);
+      const clip = track.clips.find((c) => c.id === d.ref.clipId);
       if (clip) {
-        state.seek(clip.timelineStartMs + d.origT);
-        state.selectClip(d.clipId);
+        state.seek(clip.timelineStartMs + d.ref.t);
+        state.selectClip(d.ref.clipId);
+        state.setSelectedKeyframes([d.ref]);
       }
     }
     drag.current = null;
@@ -125,18 +128,28 @@ export const TrackKeyframeLanes = memo(function TrackKeyframeLanes({
             const times = keyTimes(clip, prop);
             if (!times.length) return null;
             const propLabel = t(propLabelKey(prop));
-            return times.map((time) => {
+            return times.map((time, i) => {
               const left = padLeft + (clip.timelineStartMs + time) * pxPerMs;
               const timeLabel = formatTime(clip.timelineStartMs + time);
+              const selected = selectedKeys.has(keyframeKey({ clipId: clip.id, prop, t: time }));
               return (
                 <button
-                  key={`${clip.id}:${prop}:${time}`}
+                  // Keyed by rank, not by time: a drag retimes the key under the
+                  // pointer, and a time-based key would remount the button
+                  // mid-gesture - taking the pointer capture, and the drag, with
+                  // it. Ranks are stable because a drag never reorders the lane.
+                  key={`${clip.id}:${prop}:${i}`}
                   type="button"
                   aria-label={`${t('inspector.keyframe')} · ${propLabel} · ${timeLabel}`}
+                  aria-pressed={selected}
                   title={`${propLabel} · ${timeLabel}`}
-                  className="absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[1px] border border-zinc-900 bg-zinc-100 shadow cursor-ew-resize touch-none hover:bg-sky-200 active:bg-sky-300"
+                  className={`absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[1px] border shadow cursor-ew-resize touch-none ${
+                    selected
+                      ? 'scale-125 border-sky-200 bg-sky-400'
+                      : 'border-zinc-900 bg-zinc-100 hover:bg-sky-200 active:bg-sky-300'
+                  }`}
                   style={{ left }}
-                  onPointerDown={(e) => onDown(e, clip, time)}
+                  onPointerDown={(e) => onDown(e, clip, prop, time)}
                   onPointerMove={onMove}
                   onPointerUp={onUp}
                   onPointerCancel={onUp}

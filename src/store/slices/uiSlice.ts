@@ -70,6 +70,7 @@ export function createUiSlice(
   | 'setInspectorOpen'
   | 'setInspectorTab'
   | 'setLibraryOpen'
+  | 'setLibraryTab'
   | 'setShortcutsOpen'
   | 'setPreferencesOpen'
   | 'setAboutOpen'
@@ -148,6 +149,7 @@ export function createUiSlice(
     setInspectorOpen: (open) => set({ inspectorOpen: open }),
     setInspectorTab: (tab) => set({ inspectorTab: tab }),
     setLibraryOpen: (open) => set({ libraryOpen: open }),
+    setLibraryTab: (tab) => set({ libraryTab: tab }),
     setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
     setPreferencesOpen: (open) => set({ preferencesOpen: open }),
     setAboutOpen: (open) => set({ aboutOpen: open }),

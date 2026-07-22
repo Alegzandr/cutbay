@@ -3,11 +3,13 @@ import {
   Clip,
   ClipShape,
   EaseId,
+  KeyframeRef,
   LoopRegion,
   MediaAsset,
   Project,
   Track,
   AspectRatio,
+  TransitionType,
 } from '../types';
 import type { TimeFormat } from '../lib/time';
 import type { PreviewResolutionMode } from '../app/config';
@@ -17,6 +19,13 @@ import type { FFmpegProgress } from '../media/ffmpeg';
 
 /** Panes of the inspector column. */
 export type InspectorTab = 'clip' | 'subtitles';
+
+/**
+ * Tabs of the media library column. `media` is the imported-source bin; the
+ * other two are browsable catalogues applied by drag or double-click, the way
+ * a desktop NLE docks its effect bins.
+ */
+export type LibraryTab = 'media' | 'effects' | 'transitions';
 
 export interface ClipboardItem {
   clip: Clip;
@@ -86,6 +95,13 @@ export interface EditorState {
   selectedClipId: string | null;
   /** Full selection (multi-select via Ctrl/Cmd+click on desktop). */
   selectedClipIds: string[];
+  /**
+   * Keyframes boxed on the timeline's per-property lanes (drag a rectangle over
+   * an expanded track). Independent of the clip selection: Delete, the easing
+   * picker and a diamond drag all act on this set when it is non-empty. Each
+   * entry names a key by `(clipId, prop, t)`, so a retime rewrites the list.
+   */
+  selectedKeyframes: KeyframeRef[];
   currentTimeMs: number;
   /** Incremented on every user seek - the playback engine resyncs to it. */
   seekVersion: number;
@@ -144,6 +160,8 @@ export interface EditorState {
   inspectorTab: InspectorTab;
   /** Mobile only: the media library lives in a drawer (desktop docks it permanently). */
   libraryOpen: boolean;
+  /** Which catalogue the media library column shows. */
+  libraryTab: LibraryTab;
   shortcutsOpen: boolean;
   /** Preferences dialog (language, time format). */
   preferencesOpen: boolean;
@@ -308,6 +326,23 @@ export interface EditorState {
    * properties) — its own history entry, driven by the inspector easing picker.
    */
   setClipKeyframesEase: (clipId: string, atT: number, ease: EaseId) => void;
+  /**
+   * Replace the keyframe box-selection. Passing `[]` clears it — which every
+   * plain click on the timeline does, so the set never outlives the gesture that
+   * made it.
+   */
+  setSelectedKeyframes: (refs: KeyframeRef[]) => void;
+  /**
+   * Slide every selected keyframe by `deltaMs` (clip-local), rewriting the
+   * selection to the times they land on. Live — the lane drag wraps it with
+   * begin/endGesture so one drag is one undo step. The caller clamps `deltaMs`
+   * with `selectionDragBounds`; this only guards each clip's extent.
+   */
+  moveSelectedKeyframes: (deltaMs: number) => void;
+  /** Remove every selected keyframe — its own history entry (Delete/Backspace). */
+  deleteSelectedKeyframes: () => void;
+  /** Set the easing of every selected keyframe — its own history entry. */
+  setSelectedKeyframesEase: (ease: EaseId) => void;
   moveClip: (clipId: string, timelineStartMs: number, targetTrackId?: string) => void;
   /** Batch position update (multi-selection drag), no history - wrap with begin/endGesture. */
   moveClips: (entries: { clipId: string; timelineStartMs: number }[]) => void;
@@ -367,6 +402,20 @@ export interface EditorState {
    * crops are then adjustable per clip (crop edit mode).
    */
   applyStreamLayout: (clipId: string) => void;
+  /**
+   * Apply a catalogue effect preset to each of `clipIds` (one undo step). An
+   * audio preset lands on the clip's linked audio partner when it has one, so
+   * dropping a reverb on the picture half of an A/V pair reaches the sound the
+   * mix actually plays. Clips the preset does not accept are skipped.
+   */
+  applyEffectPreset: (effectId: string, clipIds: string[]) => void;
+  /**
+   * Set a clip's incoming transition, creating the overlap it renders over when
+   * the clip currently butts against its predecessor. Returns false when there
+   * is nothing to transition from (no previous clip on the track), so the caller
+   * can explain the no-op instead of silently doing nothing.
+   */
+  applyTransition: (clipId: string, type: TransitionType) => boolean;
   /** Preview crop-edit mode for the selected video clip (session state). */
   cropEditing: boolean;
   setCropEditing: (v: boolean) => void;
@@ -428,6 +477,7 @@ export interface EditorState {
   setInspectorOpen: (open: boolean) => void;
   setInspectorTab: (tab: InspectorTab) => void;
   setLibraryOpen: (open: boolean) => void;
+  setLibraryTab: (tab: LibraryTab) => void;
   setShortcutsOpen: (open: boolean) => void;
   setPreferencesOpen: (open: boolean) => void;
   setAboutOpen: (open: boolean) => void;

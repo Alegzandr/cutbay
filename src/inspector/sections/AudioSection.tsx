@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { X } from 'lucide-react';
 import { useStore } from '../../store/store';
 import { ToggleButton } from '../../ui/ToggleButton';
 import { AudioFxType, Clip } from '../../types';
@@ -6,11 +7,6 @@ import { SliderRow } from '../SliderRow';
 import { gainDb } from '../format';
 import { DB_STEP_FADER, faderToGain, faderToGainStepped, gainToFader } from '../../lib/gain';
 import { useVolumeEntry } from '../../ui/VolumeEntry';
-
-/** The audio effects offered, in the order they chain and appear. */
-const FX_TYPES: AudioFxType[] = ['leveler', 'voice', 'bass', 'reverb', 'echo'];
-/** Intensity a freshly enabled effect starts at. */
-const DEFAULT_FX_AMOUNT = 0.5;
 
 export function AudioSection({ clip }: { clip: Clip }) {
   const { t } = useTranslation();
@@ -21,11 +17,8 @@ export function AudioSection({ clip }: { clip: Clip }) {
   });
 
   const fxList = clip.audioFx ?? [];
-  const findFx = (type: AudioFxType) => fxList.find((f) => f.type === type);
-  const toggleFx = (type: AudioFxType) => {
-    const next = findFx(type)
-      ? fxList.filter((f) => f.type !== type)
-      : [...fxList, { type, amount: DEFAULT_FX_AMOUNT }];
+  const removeFx = (type: AudioFxType) => {
+    const next = fxList.filter((f) => f.type !== type);
     updateClipCommitted(clip.id, { audioFx: next.length ? next : undefined });
   };
   // Live (one undo per drag via SliderRow's begin/endGesture); the sameAudioMix
@@ -81,31 +74,45 @@ export function AudioSection({ clip }: { clip: Clip }) {
         </ToggleButton>
       </div>
 
-      {/* Audio effects: named one-tap presets, each with a single intensity
-          slider once on — a voice-effects tray, not a mixing desk. */}
+      {/* The effects this clip actually runs, each with its intensity and a way
+          off. The roster of available effects lives in the library's Effects
+          tab: listing it here too would say the same thing twice. */}
       <div className="space-y-2 border-t border-zinc-800 pt-3">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
           {t('inspector.audioFx')}
         </h3>
-        <div className="flex flex-wrap gap-1.5">
-          {FX_TYPES.map((type) => (
-            <ToggleButton key={type} active={!!findFx(type)} onClick={() => toggleFx(type)}>
-              {t(`inspector.audioFx.${type}`)}
-            </ToggleButton>
-          ))}
-        </div>
-        {FX_TYPES.filter((type) => findFx(type)).map((type) => (
-          <SliderRow
-            key={type}
-            label={t(`inspector.audioFx.${type}`)}
-            value={findFx(type)!.amount}
-            min={0}
-            max={1}
-            step={0.01}
-            format={(v) => `${Math.round(v * 100)}%`}
-            onChange={(v) => setFxAmount(type, v)}
-          />
-        ))}
+        {fxList.length === 0 ? (
+          <p className="text-2xs leading-snug text-zinc-500">{t('inspector.audioFx.empty')}</p>
+        ) : (
+          fxList.map((fx) => (
+            <div key={fx.type} className="flex items-center gap-1">
+              <div className="min-w-0 flex-1">
+                <SliderRow
+                  label={t(`inspector.audioFx.${fx.type}`)}
+                  value={fx.amount}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  format={(v) => `${Math.round(v * 100)}%`}
+                  onChange={(v) => setFxAmount(fx.type, v)}
+                />
+              </div>
+              <button
+                type="button"
+                className="touch-hit flex-none rounded p-1 text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-300 active:bg-zinc-800 pointer-coarse:p-2"
+                onClick={() => removeFx(fx.type)}
+                aria-label={t('inspector.audioFx.remove', {
+                  name: t(`inspector.audioFx.${fx.type}`),
+                })}
+                title={t('inspector.audioFx.remove', {
+                  name: t(`inspector.audioFx.${fx.type}`),
+                })}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))
+        )}
       </div>
     </>
   );

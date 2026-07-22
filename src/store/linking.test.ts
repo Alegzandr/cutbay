@@ -321,3 +321,72 @@ describe('multi-clip link groups', () => {
     for (const c of allClips()) expect(c.volume).toBeGreaterThan(0);
   });
 });
+
+describe('addSubtitleClips', () => {
+  const cues = [
+    { startMs: 0, endMs: 1000, text: 'one' },
+    { startMs: 2000, endMs: 3000, text: 'two' },
+  ];
+  const clips = () => s().project.tracks.flatMap((t) => t.clips);
+  /** Captions sit on their own video lane, so `pair()` can't tell them apart. */
+  const captions = () =>
+    clips()
+      .filter((c) => c.kind === 'text')
+      .sort((a, b) => a.timelineStartMs - b.timelineStartMs);
+  const picture = () => clips().find((c) => c.kind === 'media' && c.assetId === 'v')!;
+  const sound = () =>
+    s()
+      .project.tracks.filter((t) => t.kind === 'audio')
+      .flatMap((t) => t.clips)[0]!;
+
+  /** A video with one audio track, on the timeline, plus its container captions. */
+  function importWithCaptions() {
+    s().addAsset(videoAsset('v'));
+    s().addClipFromAsset('v');
+    s().addSubtitleClips(cues, 'v');
+  }
+
+  it('links container captions to the footage they came from', () => {
+    importWithCaptions();
+
+    // The captions join the picture clip's EXISTING group, so the extracted
+    // audio stays in the same set rather than being split off.
+    const linkId = picture().linkId;
+    expect(linkId).toBeTruthy();
+    expect(captions()).toHaveLength(2);
+    for (const c of captions()) expect(c.linkId).toBe(linkId);
+    expect(sound().linkId).toBe(linkId);
+  });
+
+  it('carries the captions when the footage moves', () => {
+    importWithCaptions();
+    s().moveClip(picture().id, 4000);
+
+    expect(captions().map((c) => c.timelineStartMs)).toEqual([4000, 6000]);
+  });
+
+  it('leaves cue timings alone when the footage is trimmed', () => {
+    // Trim re-aims a clip into its media; a caption has no source to absorb
+    // that, so the group's text side must sit the edit out.
+    importWithCaptions();
+    const before = captions().map((c) => ({ ...c }));
+    s().trimClip(picture().id, 'left', 1500);
+
+    for (const [i, c] of captions().entries()) {
+      expect(c.timelineStartMs).toBe(before[i]!.timelineStartMs);
+      expect(c.sourceInMs).toBe(before[i]!.sourceInMs);
+      expect(c.sourceOutMs).toBe(before[i]!.sourceOutMs);
+    }
+    // The extracted audio still trims in lockstep with the picture.
+    expect(picture().sourceInMs).toBeGreaterThan(0);
+    expect(sound().sourceInMs).toBe(picture().sourceInMs);
+  });
+
+  it('leaves a loose .srt unlinked', () => {
+    s().addAsset(videoAsset('v'));
+    s().addClipFromAsset('v');
+    s().addSubtitleClips(cues);
+
+    for (const c of captions()) expect(c.linkId).toBeUndefined();
+  });
+});

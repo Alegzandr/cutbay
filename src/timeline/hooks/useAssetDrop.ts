@@ -1,7 +1,15 @@
 import { useState, type DragEvent } from 'react';
 import { useStore } from '../../store/store';
 import { msFromContentX, timelineContentEl } from '../coords';
-import { ASSET_DRAG_MIME, MARKER_BAR_HEIGHT_PX, RULER_HEIGHT_PX } from '../../app/config';
+import {
+  ASSET_DRAG_MIME,
+  EFFECT_DRAG_MIME,
+  MARKER_BAR_HEIGHT_PX,
+  RULER_HEIGHT_PX,
+  TRANSITION_DRAG_MIME,
+} from '../../app/config';
+import { isTransitionType } from '../../effects/catalog';
+import { t } from '../../i18n';
 import { NEW_TRACK_TARGET } from '../../store/projectOps';
 import { trackTops } from '../trackHeight';
 
@@ -18,18 +26,33 @@ function belowTracks(e: DragEvent): boolean {
   return e.clientY >= rowsBottom;
 }
 
+/** The clip a catalogue drag is currently over, or null when it is over empty space. */
+function clipUnder(e: DragEvent): string | null {
+  return (e.target as HTMLElement).closest<HTMLElement>('[data-clip-id]')?.dataset.clipId ?? null;
+}
+
 /**
- * Drag from the media library: drop an asset at a precise time (and track).
- * Below the last row the drop creates a fresh track; `newTrackDragOver` drives
- * the placeholder row the Timeline shows there while the drag hovers it.
+ * Drag from the media library: drop an asset at a precise time (and track), or
+ * drop a catalogue entry (effect / transition) onto the clip it lands on.
+ * Below the last row an asset drop creates a fresh track; `newTrackDragOver`
+ * drives the placeholder row the Timeline shows there while the drag hovers it.
  */
 export function useAssetDrop() {
   const [newTrackDragOver, setNewTrackDragOver] = useState(false);
   const onAssetDragOver = (e: DragEvent) => {
-    if (e.dataTransfer.types.includes(ASSET_DRAG_MIME)) {
+    const types = e.dataTransfer.types;
+    if (types.includes(ASSET_DRAG_MIME)) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
       setNewTrackDragOver(belowTracks(e));
+      return;
+    }
+    // Catalogue entries land on a clip, never on empty timeline: refusing the
+    // drop off-clip is what tells the user where they are allowed to let go.
+    if (types.includes(EFFECT_DRAG_MIME) || types.includes(TRANSITION_DRAG_MIME)) {
+      if (!clipUnder(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
     }
   };
   const onAssetDragLeave = (e: DragEvent) => {
@@ -40,6 +63,23 @@ export function useAssetDrop() {
   };
   const onAssetDrop = (e: DragEvent) => {
     setNewTrackDragOver(false);
+    const effectId = e.dataTransfer.getData(EFFECT_DRAG_MIME);
+    const transition = e.dataTransfer.getData(TRANSITION_DRAG_MIME);
+    if (effectId || transition) {
+      const clipId = clipUnder(e);
+      if (!clipId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const s = useStore.getState();
+      if (effectId) {
+        s.applyEffectPreset(effectId, [clipId]);
+      } else if (isTransitionType(transition) && !s.applyTransition(clipId, transition)) {
+        // Silent failure here would read as a broken drop: the clip has no
+        // predecessor to transition from, or a gap it refuses to close.
+        s.setNotice(t('library.transitions.rejected'));
+      }
+      return;
+    }
     const assetId = e.dataTransfer.getData(ASSET_DRAG_MIME);
     if (!assetId) return;
     e.preventDefault();

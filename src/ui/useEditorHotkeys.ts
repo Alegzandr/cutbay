@@ -278,7 +278,10 @@ export function useEditorHotkeys() {
           return;
         case 'Delete':
         case 'Backspace':
-          s.deleteClips(s.selectedClipIds, e.shiftKey);
+          // A boxed set of keyframes takes the key: deleting the clips under it
+          // instead would be a wildly bigger edit than the selection shows.
+          if (s.selectedKeyframes.length) s.deleteSelectedKeyframes();
+          else s.deleteClips(s.selectedClipIds, e.shiftKey);
           return;
         case ',':
           nudgeSelected(-1);

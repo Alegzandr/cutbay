@@ -193,24 +193,47 @@ function peaksFromBuffer(buffer: AudioBuffer): number[] {
   const bins = expectedPeakBins(durationMs);
   const out = new Array<number>(bins).fill(0);
   const data = buffer.getChannelData(0);
-  const stride = Math.max(1, Math.floor(data.length / bins / 32));
+  const stride = Math.max(1, Math.floor(data.length / bins / SAMPLES_PER_BIN));
   for (let j = 0; j < data.length; j += stride) {
     const bin = Math.floor((j / data.length) * bins);
     if (bin < 0 || bin >= bins) continue;
     const v = Math.abs(data[j]!);
     if (v > out[bin]!) out[bin] = v;
   }
-  let max = 0;
-  for (const v of out) if (v > max) max = v;
-  if (max > 0) for (let i = 0; i < bins; i++) out[i]! /= max;
-  return out;
+  return normalize(out);
 }
+
+/**
+ * Samples read per bin. Decimating harder is cheaper but keeps missing the
+ * actual peak inside the bin, which reads as a jittery envelope rather than a
+ * smooth one.
+ */
+const SAMPLES_PER_BIN = 64;
 
 const peaksPromises = new Map<string, Promise<number[] | null>>();
 
-/** Peak resolution: 50 bins per second, enough for one bin per pixel at high zoom. */
+/**
+ * Peak resolution: 150 bins per second. The waveform interpolates between bins,
+ * so this sets how much real detail exists rather than where stair-stepping
+ * starts - but below ~100 bins/s the envelope visibly smooths away transients
+ * at the zoom levels used for cutting on beats.
+ *
+ * The cap keeps hour-long footage from dominating the project file; peaks are
+ * serialized (see `projectFile.ts`), rounded to 3 decimals by `normalize`.
+ */
 export function expectedPeakBins(durationMs: number): number {
-  return Math.round(Math.min(30000, Math.max(200, (durationMs / 1000) * 50)));
+  return Math.round(Math.min(200000, Math.max(200, (durationMs / 1000) * 150)));
+}
+
+/**
+ * Scale an envelope to 0..1 in place, rounded to 3 decimals - full float
+ * precision is invisible on a 64px-tall bar and triples the serialized size.
+ */
+function normalize(out: number[]): number[] {
+  let max = 0;
+  for (const v of out) if (v > max) max = v;
+  if (max > 0) for (let i = 0; i < out.length; i++) out[i] = Math.round((out[i]! / max) * 1000) / 1000;
+  return out;
 }
 
 /** Normalized waveform peaks (0..1) across the asset's duration (memoized per track). */
@@ -249,7 +272,7 @@ async function streamPeaks(
     const data = wrapped.buffer.getChannelData(0);
     const sr = wrapped.buffer.sampleRate;
     // Sampling every few frames is plenty for a visual envelope.
-    const stride = Math.max(1, Math.floor(((durationSec / bins) * sr) / 32));
+    const stride = Math.max(1, Math.floor(((durationSec / bins) * sr) / SAMPLES_PER_BIN));
     for (let j = 0; j < data.length; j += stride) {
       const bin = Math.floor(((wrapped.timestamp + j / sr) / durationSec) * bins);
       if (bin < 0 || bin >= bins) continue;
@@ -258,8 +281,5 @@ async function streamPeaks(
     }
   }
 
-  let max = 0;
-  for (const v of out) if (v > max) max = v;
-  if (max > 0) for (let i = 0; i < bins; i++) out[i]! /= max;
-  return out;
+  return normalize(out);
 }

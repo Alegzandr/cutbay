@@ -29,6 +29,7 @@ import {
   insertTrack,
   linkedPartnerIds,
   patchClips,
+  sourceLinkedIds,
   withLinkedIds,
 } from '../projectOps';
 import { clamp } from '../../lib/time';
@@ -602,7 +603,7 @@ export function createClipsSlice(
       // Linked partners share the source geometry, so the same edit trims the
       // extracted audio in lockstep with the video (and vice versa).
       const edits = new Map<string, (c: Clip) => Clip>([[clipId, edit]]);
-      for (const id of linkedPartnerIds(p, clipId)) edits.set(id, edit);
+      for (const id of sourceLinkedIds(p, clipId)) edits.set(id, edit);
       set({ project: patchClips(p, edits) });
     },
 
@@ -622,7 +623,7 @@ export function createClipsSlice(
       const p = get().project;
       // Linked partners share the source geometry: slip both sides in lockstep.
       const edits = new Map<string, (c: Clip) => Clip>([[clipId, edit]]);
-      for (const id of linkedPartnerIds(p, clipId)) edits.set(id, edit);
+      for (const id of sourceLinkedIds(p, clipId)) edits.set(id, edit);
       set({ project: patchClips(p, edits) });
     },
 
@@ -899,6 +900,22 @@ export function createClipsSlice(
               (t) => t.kind === 'video' && t.clips.some((c) => c.assetId === anchorAssetId),
             )
           : -1;
+        // Captions extracted from a container start out A/V-linked to the
+        // footage they were burned alongside, so dragging the shot carries its
+        // subtitles instead of desyncing them. Joining the picture clip's
+        // existing group (rather than making a new one) keeps any extracted
+        // audio in the same set. Unlink breaks it when the user wants the
+        // captions to stand alone.
+        let linkId: string | undefined;
+        if (anchorIdx >= 0) {
+          const anchor = p.tracks[anchorIdx]!.clips
+            .filter((c) => c.assetId === anchorAssetId)
+            .sort((a, b) => a.timelineStartMs - b.timelineStartMs)[0];
+          if (anchor) {
+            linkId = anchor.linkId ?? uid('link');
+            anchor.linkId = linkId;
+          }
+        }
         const firstVideoIdx = p.tracks.findIndex((t) => t.kind === 'video');
         const at = anchorIdx >= 0 ? anchorIdx : firstVideoIdx >= 0 ? firstVideoIdx : 0;
         p.tracks.splice(at, 0, track);
@@ -908,6 +925,7 @@ export function createClipsSlice(
             id: uid('clip'),
             assetId: '',
             trackId: track.id,
+            ...(linkId ? { linkId } : {}),
             timelineStartMs: cue.startMs,
             sourceInMs: 0,
             sourceOutMs: Math.max(MIN_CLIP_DURATION_MS, cue.endMs - cue.startMs),

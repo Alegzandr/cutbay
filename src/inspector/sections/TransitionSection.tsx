@@ -1,35 +1,24 @@
 import { useTranslation } from 'react-i18next';
 import { useStore } from '../../store/store';
-import { Clip, TransitionType } from '../../types';
+import { Clip } from '../../types';
 import { trackCrossfades } from '../../model';
-
-/** Transition styles offered for an overlapping clip's entry. */
-const TRANSITIONS: TransitionType[] = [
-  'dissolve',
-  'dipBlack',
-  'dipWhite',
-  'slideLeft',
-  'slideRight',
-  'slideUp',
-  'slideDown',
-  'wipe',
-  'zoom',
-];
+import { seconds } from '../format';
 
 /**
- * Transition picker for how the clip enters over its overlap with the previous
- * clip. Rendered only when such an overlap exists (Vegas-style: clips overlap to
- * transition); otherwise it explains how to make one, so picking a style is
- * never a no-op.
+ * What transition this clip enters on, if any. A read-out, not a picker: the
+ * nine styles are the library's Transitions tab now, and listing them again
+ * here would be the same catalogue twice.
+ *
+ * Transitions are derived purely from clip overlap (Vegas-style), so there is
+ * nothing to "delete" from this panel either - dragging the clips apart on the
+ * timeline is what removes the crossfade.
  */
 export function TransitionSection({ clip }: { clip: Clip }) {
   const { t } = useTranslation();
   const project = useStore((s) => s.project);
-  const { updateClipCommitted } = useStore.getState();
 
   const track = project.tracks.find((tr) => tr.clips.some((c) => c.id === clip.id));
   const inMs = track ? trackCrossfades(track.clips).get(clip.id)?.inMs ?? 0 : 0;
-  const current = clip.transition ?? 'dissolve';
 
   return (
     <div className="space-y-2 border-t border-zinc-800 pt-3">
@@ -37,21 +26,11 @@ export function TransitionSection({ clip }: { clip: Clip }) {
         {t('inspector.transition')}
       </h3>
       {inMs > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {TRANSITIONS.map((type) => (
-            <button
-              key={type}
-              type="button"
-              onClick={() => updateClipCommitted(clip.id, { transition: type })}
-              className={`touch-hit rounded px-2 py-1 text-2xs font-medium ${
-                current === type
-                  ? 'bg-sky-500/20 text-sky-300'
-                  : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700/60 active:bg-zinc-700'
-              }`}
-            >
-              {t(`inspector.transition.${type}`)}
-            </button>
-          ))}
+        <div className="flex items-baseline gap-2 text-xs">
+          <span className="min-w-0 flex-1 truncate text-zinc-200">
+            {t(`inspector.transition.${clip.transition ?? 'dissolve'}`)}
+          </span>
+          <span className="flex-none tabular-nums text-zinc-400">{seconds(inMs)}</span>
         </div>
       ) : (
         <p className="text-2xs leading-snug text-zinc-500">{t('inspector.transition.hint')}</p>

@@ -26,6 +26,8 @@ import { useMobileScrubSync } from './hooks/useMobileScrubSync';
 import { useAssetDrop } from './hooks/useAssetDrop';
 import { publishViewport } from './viewport';
 import { trackIndexAtY, trackTops } from './trackHeight';
+import { keyframeKey, keyframesInBox } from './keyframeSelection';
+import type { KeyframeRef } from '../types';
 
 /** Vertical guide at the point a drag is currently snapped to (all NLEs flash one). */
 function SnapGuide() {
@@ -71,6 +73,7 @@ export function Timeline() {
     x0: number;
     y0: number;
     base: string[];
+    baseKeyframes: KeyframeRef[];
     el: HTMLElement;
     pointerId: number;
   } | null>(null);
@@ -85,6 +88,7 @@ export function Timeline() {
       const mq = marqueeRef.current;
       if (mq) {
         useStore.getState().setSelectedClips(mq.base);
+        useStore.getState().setSelectedKeyframes(mq.baseKeyframes);
         try {
           mq.el.releasePointerCapture(mq.pointerId);
         } catch {
@@ -235,7 +239,12 @@ export function Timeline() {
     useStore.getState().seek(msFromClientX(e.currentTarget as HTMLElement, e.clientX));
   };
 
-  /** Live marquee: select every clip the box touches (rows × time span). */
+  /**
+   * Live marquee: select every clip the box touches (rows × time span), plus
+   * every keyframe diamond it encloses on the property lanes of the expanded
+   * tracks it crosses. One box does both - which of the two the user meant is
+   * answered by where they dragged, not by a modifier.
+   */
   const updateMarquee = (rowsEl: HTMLElement, clientX: number, clientY: number) => {
     const mq = marqueeRef.current;
     if (!mq) return;
@@ -245,11 +254,14 @@ export function Timeline() {
     if (!content) return;
     const [minY, maxY] = [Math.min(mq.y0, clientY), Math.max(mq.y0, clientY)];
     const ids = new Set(mq.base);
+    const keyframes = [...mq.baseKeyframes];
+    const seenKeys = new Set(keyframes.map(keyframeKey));
     const top = rowsEl.getBoundingClientRect().top;
     const n = s.project.tracks.length;
     // Variable row heights: sum the tops once, then walk to find the two rows
     // the marquee touches instead of dividing by a fixed height.
-    const tops = trackTops(s.project.tracks, s.trackHeightPx, new Set(s.expandedTrackIds));
+    const expanded = new Set(s.expandedTrackIds);
+    const tops = trackTops(s.project.tracks, s.trackHeightPx, expanded);
     const totalH = tops[n]!;
     if (maxY >= top && minY <= top + totalH) {
       const r0 = clamp(trackIndexAtY(tops, minY - top), 0, n - 1);
@@ -261,6 +273,17 @@ export function Timeline() {
           if (clip.timelineStartMs < t1 && clipEndMs(clip) > t0) ids.add(clip.id);
         }
       }
+      for (const ref of keyframesInBox(s.project.tracks, expanded, tops, {
+        minY: minY - top,
+        maxY: maxY - top,
+        t0,
+        t1,
+      })) {
+        const key = keyframeKey(ref);
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        keyframes.push(ref);
+      }
     }
     // A pointermove that didn't change the boxed set must not commit a fresh
     // selection array: that would re-render every touched clip on every move.
@@ -268,44 +291,58 @@ export function Timeline() {
     if (cur.length !== ids.size || !cur.every((id) => ids.has(id))) {
       s.setSelectedClips([...ids]);
     }
+    const curKeys = s.selectedKeyframes;
+    if (curKeys.length !== keyframes.length || !curKeys.every((k) => seenKeys.has(keyframeKey(k)))) {
+      s.setSelectedKeyframes(keyframes);
+    }
   };
 
   const onBgPointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).dataset.rowbg === undefined) return;
-    // Ctrl/Cmd+drag on the background (desktop): marquee / rubber-band select.
-    // Shift on top keeps the existing selection and adds the boxed clips to it.
-    if (!coarse && e.button === 0 && (e.ctrlKey || e.metaKey)) {
+    const target = e.target as HTMLElement;
+    // The row background and the empty part of a keyframe lane are both fair
+    // game to start a box on - a lane is where the keyframes are, so refusing
+    // it would put the diamonds out of reach of the very gesture that selects
+    // them. A diamond itself stops the event before it ever gets here.
+    const onBackground = target.dataset.rowbg !== undefined || target.dataset.trackLane !== undefined;
+    if (!onBackground) return;
+    // Left-drag on the background (desktop): marquee / rubber-band select, the
+    // reflex every NLE trained. Shift keeps the existing selection and adds to
+    // it. Scrubbing lives on the ruler, which is why the background is free.
+    if (!coarse && e.button === 0) {
       const el = e.currentTarget as HTMLElement;
       el.setPointerCapture(e.pointerId);
+      const s = useStore.getState();
       marqueeRef.current = {
         x0: e.clientX,
         y0: e.clientY,
-        base: e.shiftKey ? useStore.getState().selectedClipIds : [],
+        base: e.shiftKey ? s.selectedClipIds : [],
+        baseKeyframes: e.shiftKey ? s.selectedKeyframes : [],
         el,
         pointerId: e.pointerId,
       };
       return;
     }
     selectClip(null);
-    if (coarse || e.button !== 0) return;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    seekToClientX(e);
   };
   const onBgPointerMove = (e: React.PointerEvent) => {
     if (!(e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId)) return;
     if (marqueeRef.current) updateMarquee(e.currentTarget as HTMLElement, e.clientX, e.clientY);
-    else seekToClientX(e);
   };
   const onBgPointerUp = (e: React.PointerEvent) => {
     const mq = marqueeRef.current;
     if (!mq) return;
-    // A Ctrl+click that never moved: no box - just apply the base selection
-    // (clears everything, or keeps it as-is when Shift was adding).
-    if (Math.abs(e.clientX - mq.x0) < 4 && Math.abs(e.clientY - mq.y0) < 4) {
-      useStore.getState().setSelectedClips(mq.base);
-    }
     marqueeRef.current = null;
     setMarquee(null);
+    // A press that never moved is a click, not a box: drop the selection and
+    // put the playhead there, the behaviour the background had before.
+    if (Math.abs(e.clientX - mq.x0) < 4 && Math.abs(e.clientY - mq.y0) < 4) {
+      useStore.getState().setSelectedClips(mq.base);
+      useStore.getState().setSelectedKeyframes(mq.baseKeyframes);
+      if (!mq.base.length && !mq.baseKeyframes.length) {
+        selectClip(null);
+        seekToClientX(e);
+      }
+    }
   };
 
   return (

@@ -43,8 +43,10 @@ import {
   Settings,
   Info,
   Captions,
+  Wand2,
 } from 'lucide-react';
 import { useStore, getSelectedClip, getLinkTargets } from '../store/store';
+import type { LibraryTab } from '../store/editorState';
 import { useImport } from './useImport';
 import { openMediaPicker, openSubtitlePicker } from './mediaPicker';
 import { confirmDiscardProject, openProject, saveProject } from './projectActions';
@@ -108,8 +110,15 @@ export function useEditorCommands(): Record<string, Command> {
   // source). Subscribe to the boolean only - the pair is resolved in onClick.
   const canLink = useStore((s) => getLinkTargets(s) !== null);
   const inspectorTab = useStore((s) => s.inspectorTab);
+  const libraryTab = useStore((s) => s.libraryTab);
 
   const st = useStore.getState;
+
+  /** Show a library bin: pick its tab, and on mobile raise the drawer holding it. */
+  const showLibraryTab = (tab: LibraryTab) => {
+    st().setLibraryTab(tab);
+    st().setLibraryOpen(true);
+  };
 
   /**
    * The cue list is a pane of the inspector column, so showing it means picking
@@ -191,6 +200,11 @@ export function useEditorCommands(): Record<string, Command> {
     { id: 'view.zoomIn', labelKey: 'menu.view.zoomIn', icon: ZoomIn, shortcut: '+', onClick: () => zoomAtPlayhead(1.25) },
     { id: 'view.zoomOut', labelKey: 'menu.view.zoomOut', icon: ZoomOut, shortcut: '−', onClick: () => zoomAtPlayhead(1 / 1.25) },
     { id: 'view.subtitles', labelKey: 'menu.view.subtitles', icon: Captions, checked: inspectorTab === 'subtitles', onClick: () => toggleSubtitlesPane() },
+    // The library's three bins. Desktop docks the column permanently, so these
+    // only pick a tab; on mobile they also raise the drawer that holds it.
+    { id: 'view.media', labelKey: 'menu.view.media', icon: FolderOpen, checked: libraryTab === 'media', onClick: () => showLibraryTab('media') },
+    { id: 'view.effects', labelKey: 'menu.view.effects', icon: Wand2, checked: libraryTab === 'effects', onClick: () => showLibraryTab('effects') },
+    { id: 'view.transitions', labelKey: 'menu.view.transitions', icon: Blend, checked: libraryTab === 'transitions', onClick: () => showLibraryTab('transitions') },
     { id: 'view.snap', labelKey: 'menu.view.snap', hintKey: snapEnabled ? 'transport.snapping.on' : 'transport.snapping.off', icon: Magnet, shortcut: 'N', checked: snapEnabled, onClick: () => st().toggleSnap() },
 
     // ── Playback ──────────────────────────────────────────────────────────

@@ -17,9 +17,18 @@ const TRANSFORM_PROPS: AnimatableProp[] = ['scale', 'x', 'y', 'rotation'];
 
 export function TransformSection({ clip, isVideo }: { clip: Clip; isVideo: boolean }) {
   const { t } = useTranslation();
-  const { updateClipTransformLive, toggleClipKeyframe, setClipKeyframesEase, updateClipCommitted, setCropEditing } =
-    useStore.getState();
+  const {
+    updateClipTransformLive,
+    toggleClipKeyframe,
+    setClipKeyframesEase,
+    setSelectedKeyframesEase,
+    updateClipCommitted,
+    setCropEditing,
+  } = useStore.getState();
   const cropEditing = useStore((s) => s.cropEditing);
+  // A box-selection on the timeline lanes takes over this picker: it then
+  // re-eases every boxed key at once rather than the column under the playhead.
+  const selectedKeyframes = useStore((s) => s.selectedKeyframes);
   // Subscribed so the sliders and diamonds track the value at the playhead as it
   // moves — an animated property reads its sampled value, not a stale static one.
   const currentTimeMs = useStore((s) => s.currentTimeMs);
@@ -54,6 +63,29 @@ export function TransformSection({ clip, isVideo }: { clip: Clip; isVideo: boole
       break;
     }
   }
+  const boxed = selectedKeyframes.length;
+  // With a box-selection up, the picker highlights an ease only when every
+  // boxed key already shares it - a mixed set shows nothing selected.
+  const easeOfSelection = (): EaseId | null => {
+    let common: EaseId | null = null;
+    for (const ref of selectedKeyframes) {
+      let found: EaseId | undefined;
+      for (const track of useStore.getState().project.tracks) {
+        const c = track.clips.find((cc) => cc.id === ref.clipId);
+        const k = c?.animation?.[ref.prop]?.find((kk) => Math.abs(kk.t - ref.t) < ON_KEY_EPSILON_MS);
+        if (k) {
+          found = k.ease ?? 'inOut';
+          break;
+        }
+      }
+      if (!found) continue;
+      if (common === null) common = found;
+      else if (common !== found) return null;
+    }
+    return common;
+  };
+  const activeEase = boxed ? easeOfSelection() : easeAtPlayhead;
+  const showEasing = boxed > 0 || easeAtPlayhead !== null;
 
   return (
     <div className="space-y-3 border-t border-zinc-800 pt-3">
@@ -108,17 +140,21 @@ export function TransformSection({ clip, isVideo }: { clip: Clip; isVideo: boole
       />
       {/* Easing of the key on the playhead — reachable by clicking a timeline
           diamond (which seeks onto its key) or nudging the playhead onto one. */}
-      {easeAtPlayhead && (
+      {showEasing && (
         <div className="flex items-center gap-2 pt-0.5">
-          <span className="w-16 flex-none text-xs text-zinc-500">{t('inspector.easing')}</span>
+          <span className="w-16 flex-none text-xs text-zinc-500">
+            {boxed ? t('inspector.easing.selected', { count: boxed }) : t('inspector.easing')}
+          </span>
           <div className="flex flex-1 flex-wrap gap-1">
             {EASES.map((e) => (
               <button
                 key={e}
                 type="button"
-                onClick={() => setClipKeyframesEase(clip.id, local, e)}
+                onClick={() =>
+                  boxed ? setSelectedKeyframesEase(e) : setClipKeyframesEase(clip.id, local, e)
+                }
                 className={`touch-hit rounded px-1.5 py-1 text-2xs ${
-                  easeAtPlayhead === e
+                  activeEase === e
                     ? 'bg-sky-500/20 text-sky-300'
                     : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700/60 active:bg-zinc-700'
                 }`}

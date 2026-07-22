@@ -35,7 +35,18 @@ const MENUS: readonly Menu[] = [
     titleKey: 'menu.view',
     // The shortcuts panel lives under Help alone: it was in both menus, the
     // same command listed twice under the same label.
-    items: ['view.zoomIn', 'view.zoomOut', '---', 'view.subtitles', '---', 'view.snap'],
+    items: [
+      'view.zoomIn',
+      'view.zoomOut',
+      '---',
+      'view.media',
+      'view.effects',
+      'view.transitions',
+      '---',
+      'view.subtitles',
+      '---',
+      'view.snap',
+    ],
   },
   {
     titleKey: 'menu.playback',

@@ -91,7 +91,7 @@ const GROUPS: readonly Group[] = [
       ['{{ctrl}} + {{click}}', 'shortcuts.edit.multiSelect'],
       ['{{shift}} + {{click}}', 'shortcuts.edit.rangeSelect'],
       ['{{ctrl}} + {{drag}}', 'shortcuts.edit.dragCopy'],
-      ['{{ctrl}} + {{dragBackground}}', 'shortcuts.edit.marquee'],
+      ['{{dragBackground}}', 'shortcuts.edit.marquee'],
       ['{{alt}} + {{drag}}', 'shortcuts.edit.slip'],
       ['{{ctrl}} + {{dragTrimEdge}}', 'shortcuts.edit.rippleTrim'],
       ['{{alt}} + {{dragTrimEdge}}', 'shortcuts.edit.rollEdit'],

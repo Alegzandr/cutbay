@@ -230,6 +230,19 @@ export type AnimatableProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity';
 export type ClipAnimation = Partial<Record<AnimatableProp, Keyframe[]>>;
 
 /**
+ * Identity of a single keyframe across the project — what a box-select on the
+ * timeline's property lanes collects. A `Keyframe` carries no id of its own, so
+ * it is named by where it sits; `t` is part of that identity, which means every
+ * retime has to rewrite the selection with the new times (see `moveKeyframes`).
+ */
+export interface KeyframeRef {
+  clipId: string;
+  prop: AnimatableProp;
+  /** Clip-local ms, matching `Keyframe.t`. */
+  t: number;
+}
+
+/**
  * A named audio effect a clip can carry. All are native Web Audio nodes, so they
  * cost nothing to bundle and render identically in the preview
  * (`AudioContext`) and the export (`OfflineAudioContext`):
