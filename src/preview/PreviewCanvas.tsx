@@ -303,8 +303,8 @@ function clipRectAt(
   outH: number,
   timeMs: number,
 ): DestRect | null {
-  if (isTextClip(clip)) return textClipRect(clip, outW, outH);
-  if (clip.kind === 'shape') return shapeClipRect(clip, outW, outH);
+  if (isTextClip(clip)) return textClipRect(clip, outW, outH, timeMs);
+  if (clip.kind === 'shape') return shapeClipRect(clip, outW, outH, timeMs);
   if (clip.kind === 'solid') return { dx: 0, dy: 0, dw: outW, dh: outH };
   const asset = assets[clip.assetId];
   // The dest rect only depends on the source aspect ratio, known from the probe.

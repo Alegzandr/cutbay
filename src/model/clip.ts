@@ -1,6 +1,8 @@
 import {
+  AnimatableProp,
   AudioTrackInfo,
   Clip,
+  ClipAnimation,
   ClipTransform,
   MediaAsset,
   ShapeClip,
@@ -8,6 +10,7 @@ import {
   TextClip,
   isTrackPlayable,
 } from '../types';
+import { sampleChannel } from './animation';
 
 /**
  * Clip-level model math: durations, source<->timeline mapping, fade/zoom
@@ -105,6 +108,63 @@ export function clipZoomAt(clip: Clip, timelineMs: number): number {
   if (dur <= 0) return 1;
   const progress = Math.min(1, Math.max(0, (timelineMs - clip.timelineStartMs) / dur));
   return 1 + (zoomEnd - 1) * progress;
+}
+
+/** A clip transform with every animatable field resolved to a plain number. */
+export interface ResolvedTransform {
+  crop: ClipTransform['crop'];
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+}
+
+/** Value of an animatable property at a clip-local time, or its static fallback. */
+function animatedValue(
+  anim: ClipAnimation | undefined,
+  prop: AnimatableProp,
+  fallback: number,
+  localMs: number,
+): number {
+  const keys = anim?.[prop];
+  return keys && keys.length ? sampleChannel(keys, localMs) : fallback;
+}
+
+/**
+ * The clip's transform at a timeline time, with any keyframed property sampled
+ * and any static one passed through. The one place animation is folded into
+ * geometry — preview, export and hit-testing all resolve through here, so a
+ * moving clip is framed identically wherever it is drawn or picked. Crop is not
+ * animatable in v1 and is passed through as-is.
+ */
+export function resolveTransform(clip: Clip, timelineMs: number): ResolvedTransform {
+  const t = clip.transform ?? DEFAULT_TRANSFORM;
+  const local = timelineMs - clip.timelineStartMs;
+  const a = clip.animation;
+  return {
+    crop: t.crop,
+    x: animatedValue(a, 'x', t.x, local),
+    y: animatedValue(a, 'y', t.y, local),
+    scale: animatedValue(a, 'scale', t.scale, local),
+    rotation: animatedValue(a, 'rotation', t.rotation ?? 0, local),
+  };
+}
+
+/**
+ * Per-clip opacity at a timeline time: the sampled `opacity` channel (clamped
+ * 0..1) when the clip animates it, otherwise 1. Multiplied into the draw alpha
+ * on top of fades and track opacity, so an opacity keyframe animates a clip's
+ * transparency without touching the fade envelope.
+ */
+export function resolveOpacity(clip: Clip, timelineMs: number): number {
+  const keys = clip.animation?.opacity;
+  if (!keys || !keys.length) return 1;
+  return Math.max(0, Math.min(1, sampleChannel(keys, timelineMs - clip.timelineStartMs)));
+}
+
+/** Rotation (degrees) at a timeline time, sampling the channel or the static value. */
+export function clipRotationAt(clip: Clip, timelineMs: number): number {
+  return animatedValue(clip.animation, 'rotation', clip.transform?.rotation ?? 0, timelineMs - clip.timelineStartMs);
 }
 
 /**

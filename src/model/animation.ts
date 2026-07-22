@@ -19,36 +19,12 @@
  * autosave and persistence carry it for free.
  */
 
-/**
- * Easing of the segment LEAVING a keyframe toward the next one. `hold` steps
- * (no interpolation until the next key); the rest are smooth by default —
- * `inOut` is the flow-first default that makes CapCut-style edits feel good.
- */
-export type EaseId = 'hold' | 'linear' | 'in' | 'out' | 'inOut';
+import type { Channel, EaseId, Keyframe } from '../types';
+
+export type { Channel, EaseId, Keyframe } from '../types';
 
 /** The flow-first default easing: nothing snaps unless the user asks it to. */
 export const DEFAULT_EASE: EaseId = 'inOut';
-
-export interface Keyframe {
-  /** Clip-local timeline ms (0 = clip start). Keyframes are kept sorted by `t`. */
-  t: number;
-  value: number;
-  /** Easing of the segment from this keyframe to the next. Default `inOut`. */
-  ease?: EaseId;
-  /**
-   * Custom cubic-Bézier control points `[x1, y1, x2, y2]` (implicit endpoints
-   * (0,0)/(1,1)), the desktop graph-editor's per-segment curve. Overrides `ease`
-   * when present.
-   */
-  bezier?: [number, number, number, number];
-}
-
-/**
- * An animatable property: a constant value, or a sorted, non-empty keyframe
- * list. `number` is the overwhelmingly common case (a static property) and
- * costs nothing — the keyframe machinery only exists once a property animates.
- */
-export type Channel = number | Keyframe[];
 
 /** Whether a channel actually animates (has keyframes) rather than being constant. */
 export function isAnimated(channel: Channel): channel is Keyframe[] {

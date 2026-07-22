@@ -3,8 +3,11 @@ import {
   DEFAULT_TEXT_WIDTH_FRAC,
   DEFAULT_TRANSFORM,
   clipEnvelopeGainAt,
+  clipRotationAt,
   clipZoomAt,
   isTextClip,
+  resolveOpacity,
+  resolveTransform,
   trackCrossfades,
 } from '../model';
 import { fontStack } from '../lib/fonts';
@@ -86,14 +89,14 @@ export function clipDestRect(
   outH: number,
   timelineMs?: number,
 ): DestRect {
-  const t = clip.transform ?? DEFAULT_TRANSFORM;
+  const rt = resolveTransform(clip, timelineMs ?? clip.timelineStartMs);
   const zoom = timelineMs !== undefined ? clipZoomAt(clip, timelineMs) : 1;
-  const cropW = Math.max(1, t.crop.w * srcW);
-  const cropH = Math.max(1, t.crop.h * srcH);
-  const fit = Math.min(outW / cropW, outH / cropH) * t.scale * zoom;
+  const cropW = Math.max(1, rt.crop.w * srcW);
+  const cropH = Math.max(1, rt.crop.h * srcH);
+  const fit = Math.min(outW / cropW, outH / cropH) * rt.scale * zoom;
   const dw = cropW * fit;
   const dh = cropH * fit;
-  return { dx: t.x * outW - dw / 2, dy: t.y * outH - dh / 2, dw, dh };
+  return { dx: rt.x * outW - dw / 2, dy: rt.y * outH - dh / 2, dw, dh };
 }
 
 /**
@@ -116,7 +119,7 @@ export function drawClipSample(
   alphaMul = 1,
   xfadeInMs = 0,
 ): void {
-  const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul;
+  const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul * resolveOpacity(clip, timelineMs);
   if (alpha <= 0) return;
 
   const t = clip.transform ?? DEFAULT_TRANSFORM;
@@ -129,7 +132,7 @@ export function drawClipSample(
   const { dx, dy, dw, dh } = clipDestRect(clip, sw, sh, outW, outH, timelineMs);
 
   ctx.globalAlpha = alpha;
-  withRotation(ctx, t.rotation ?? 0, dx + dw / 2, dy + dh / 2, () =>
+  withRotation(ctx, clipRotationAt(clip, timelineMs), dx + dw / 2, dy + dh / 2, () =>
     sample.draw(ctx, sx, sy, cropW, cropH, dx, dy, dw, dh),
   );
   ctx.globalAlpha = 1;
@@ -229,26 +232,26 @@ export function drawTextClip(
 ): void {
   const text = clip.text;
   if (!text.content) return;
-  const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul;
+  const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul * resolveOpacity(clip, timelineMs);
   if (alpha <= 0) return;
 
-  const t = clip.transform ?? DEFAULT_TRANSFORM;
-  const { font, px } = textFont(text, outH, t.scale);
+  const rt = resolveTransform(clip, timelineMs);
+  const { font, px } = textFont(text, outH, rt.scale);
 
   ctx.save();
   ctx.globalAlpha = alpha;
   // Rotates the caption block as a whole, inside the save/restore already here.
   // Around the transform centre, not the text baseline, so a rotated caption
   // stays where it was placed.
-  applyRotation(ctx, t.rotation ?? 0, t.x * outW, t.y * outH);
+  applyRotation(ctx, rt.rotation, rt.x * outW, rt.y * outH);
   // Set before laying out: wrapping measures against this exact font.
   ctx.font = font;
   const lines = layoutTextLines(ctx, text, outW);
   const lineHeight = px * 1.2;
   ctx.textAlign = text.align ?? 'center';
   ctx.textBaseline = 'middle';
-  const anchorX = textAnchorX(text, t.x, outW);
-  const cy = t.y * outH;
+  const anchorX = textAnchorX(text, rt.x, outW);
+  const cy = rt.y * outH;
   const lineY = (i: number) => cy + (i - (lines.length - 1) / 2) * lineHeight;
 
   // Caption pill: rounded dark panel behind each line.
@@ -305,7 +308,7 @@ export function drawSolidClip(
   xfadeInMs = 0,
 ): void {
   const solid = clip.solid;
-  const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul;
+  const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul * resolveOpacity(clip, timelineMs);
   if (alpha <= 0) return;
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -329,11 +332,11 @@ export function drawSolidClip(
  * fraction of the frame, the centre and the scale come from the transform - so
  * hit-testing, the selection outline and the corner handles need no extra case.
  */
-export function shapeClipRect(clip: ShapeClip, outW: number, outH: number): DestRect {
-  const t = clip.transform ?? DEFAULT_TRANSFORM;
-  const dw = clip.shape.w * outW * t.scale;
-  const dh = clip.shape.h * outH * t.scale;
-  return { dx: t.x * outW - dw / 2, dy: t.y * outH - dh / 2, dw, dh };
+export function shapeClipRect(clip: ShapeClip, outW: number, outH: number, timelineMs?: number): DestRect {
+  const rt = resolveTransform(clip, timelineMs ?? clip.timelineStartMs);
+  const dw = clip.shape.w * outW * rt.scale;
+  const dh = clip.shape.h * outH * rt.scale;
+  return { dx: rt.x * outW - dw / 2, dy: rt.y * outH - dh / 2, dw, dh };
 }
 
 /** Trace the outline into the current path, centred on (cx, cy). */
@@ -373,15 +376,15 @@ export function drawShapeClip(
   alphaMul = 1,
   xfadeInMs = 0,
 ): void {
-  const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul;
+  const alpha = clipEnvelopeGainAt(clip, timelineMs, xfadeInMs, 0) * alphaMul * resolveOpacity(clip, timelineMs);
   if (alpha <= 0) return;
-  const rect = shapeClipRect(clip, outW, outH);
+  const rect = shapeClipRect(clip, outW, outH, timelineMs);
   if (rect.dw <= 0 || rect.dh <= 0) return;
 
   const shape = clip.shape;
   ctx.save();
   ctx.globalAlpha = alpha;
-  applyRotation(ctx, clipRotation(clip), rect.dx + rect.dw / 2, rect.dy + rect.dh / 2);
+  applyRotation(ctx, clipRotationAt(clip, timelineMs), rect.dx + rect.dw / 2, rect.dy + rect.dh / 2);
   ctx.beginPath();
   traceShape(ctx, shape, rect);
   ctx.fillStyle = shape.fill;
@@ -403,17 +406,17 @@ let measureCtx: Ctx2D | null = null;
  * Bounding box of a text clip in output coordinates (hit-testing and the
  * preview selection overlay). Uses a shared 1×1 measuring context.
  */
-export function textClipRect(clip: TextClip, outW: number, outH: number): DestRect {
+export function textClipRect(clip: TextClip, outW: number, outH: number, timelineMs?: number): DestRect {
   const text = clip.text;
-  const t = clip.transform ?? DEFAULT_TRANSFORM;
-  if (!text.content) return { dx: t.x * outW, dy: t.y * outH, dw: 0, dh: 0 };
+  const rt = resolveTransform(clip, timelineMs ?? clip.timelineStartMs);
+  if (!text.content) return { dx: rt.x * outW, dy: rt.y * outH, dw: 0, dh: 0 };
   if (!measureCtx) {
     measureCtx =
       typeof OffscreenCanvas !== 'undefined'
         ? new OffscreenCanvas(1, 1).getContext('2d')
         : (document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D);
   }
-  const { font, px } = textFont(text, outH, t.scale);
+  const { font, px } = textFont(text, outH, rt.scale);
   measureCtx!.font = font;
   const lines = layoutTextLines(measureCtx!, text, outW);
   let dw = 0;
@@ -425,7 +428,7 @@ export function textClipRect(clip: TextClip, outW: number, outH: number): DestRe
   }
   // Same anchor as the drawing pass, so the overlay frames the painted block
   // whatever the alignment.
-  return { dx: lineLeft(text.align, textAnchorX(text, t.x, outW), dw), dy: t.y * outH - dh / 2, dw, dh };
+  return { dx: lineLeft(text.align, textAnchorX(text, rt.x, outW), dw), dy: rt.y * outH - dh / 2, dw, dh };
 }
 
 /**

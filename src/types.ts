@@ -179,6 +179,46 @@ export interface ClipTransform {
   rotation?: number;
 }
 
+/**
+ * Easing of the segment LEAVING a keyframe toward the next one. `hold` steps (no
+ * interpolation until the next key); the rest are smooth. `inOut` is the
+ * flow-first default that makes CapCut-style motion feel good. The math lives in
+ * `src/model/animation.ts`.
+ */
+export type EaseId = 'hold' | 'linear' | 'in' | 'out' | 'inOut';
+
+export interface Keyframe {
+  /** Clip-local timeline ms (0 = clip start), the same reference as fades/zoom. Kept sorted by `t`. */
+  t: number;
+  value: number;
+  /** Easing of the segment from this keyframe to the next. Undefined = `inOut`. */
+  ease?: EaseId;
+  /**
+   * Custom cubic-Bézier control points `[x1, y1, x2, y2]` (implicit endpoints
+   * (0,0)/(1,1)) — the desktop graph editor's per-segment curve. Overrides
+   * `ease` when present.
+   */
+  bezier?: [number, number, number, number];
+}
+
+/**
+ * An animatable property: a constant value (the common case, costs nothing), or
+ * a sorted non-empty keyframe list sampled over clip-local time.
+ */
+export type Channel = number | Keyframe[];
+
+/** A clip property that can be keyframed. Extended as effects gain channels. */
+export type AnimatableProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity';
+
+/**
+ * Keyframed overrides for a clip's animatable properties, keyed by property. A
+ * property present here (with keyframes) is authoritative over its static
+ * counterpart in `transform`; absent means the static value is used. Stored
+ * apart from `transform` so the compositor's static-value read sites stay
+ * numbers and only the render/hit-test paths sample over time.
+ */
+export type ClipAnimation = Partial<Record<AnimatableProp, Keyframe[]>>;
+
 /** Horizontal alignment of a text clip's lines inside its wrap box. */
 export type TextAlign = 'left' | 'center' | 'right';
 
@@ -276,6 +316,13 @@ interface BaseClip {
    */
   audioTrackIndex?: number;
   transform?: ClipTransform;
+  /**
+   * Keyframed overrides for animatable properties. Undefined = the clip is fully
+   * static and reads its transform values directly. A property listed here (with
+   * keyframes) animates and overrides the matching static value; `opacity` has no
+   * static counterpart and defaults to 1 when absent.
+   */
+  animation?: ClipAnimation;
   /**
    * Animated zoom (Ken Burns): scale multiplier reached at the END of the
    * clip, interpolated linearly from 1 at the start. 1/undefined = static.
