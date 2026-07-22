@@ -257,6 +257,25 @@ export interface ClipColor {
   blur?: Channel;
 }
 
+/**
+ * How a clip enters over its overlap with the previous clip on the track (the
+ * Vegas-style crossfade window). `dissolve` (the default when unset) is the
+ * classic cross-dissolve; `dipBlack`/`dipWhite` dip through a colour; the slides
+ * push the incoming frame in from an edge; `wipe` reveals it left to right;
+ * `zoom` scales it up as it fades in. Rendered in `drawClip` over the overlap,
+ * so it has no effect on a clip with no incoming overlap.
+ */
+export type TransitionType =
+  | 'dissolve'
+  | 'dipBlack'
+  | 'dipWhite'
+  | 'slideLeft'
+  | 'slideRight'
+  | 'slideUp'
+  | 'slideDown'
+  | 'wipe'
+  | 'zoom';
+
 /** Horizontal alignment of a text clip's lines inside its wrap box. */
 export type TextAlign = 'left' | 'center' | 'right';
 
@@ -362,6 +381,12 @@ interface BaseClip {
   transform?: ClipTransform;
   /** Colour grading (WebGL pass). Undefined/identity = the clip is drawn as-is. */
   color?: ClipColor;
+  /**
+   * How this clip enters over its overlap with the previous clip. Undefined =
+   * `dissolve` (the historical cross-dissolve). Only takes effect where an
+   * overlap exists.
+   */
+  transition?: TransitionType;
   /**
    * Keyframed overrides for animatable properties. Undefined = the clip is fully
    * static and reads its transform values directly. A property listed here (with

@@ -1,4 +1,4 @@
-import { Clip, ClipShape, ClipText, ShapeClip, SolidClip, TextClip, Track } from '../types';
+import { Clip, ClipShape, ClipText, ShapeClip, SolidClip, TextClip, Track, TransitionType } from '../types';
 import {
   DEFAULT_TEXT_WIDTH_FRAC,
   DEFAULT_TRANSFORM,
@@ -485,7 +485,7 @@ export function visibleVideoClips(track: Track, tMs: number): VisibleClip[] {
  * kind rendering is decided, shared by preview and export. Media clips need a
  * decoded `sample` (null skips them); text and solid clips are self-contained.
  */
-export function drawClip(
+function dispatchClipDraw(
   ctx: Ctx2D,
   clip: Clip,
   outW: number,
@@ -504,4 +504,99 @@ export function drawClip(
   } else if (sample) {
     drawClipSample(ctx, sample, clip, outW, outH, timelineMs, alphaMul, xfadeInMs);
   }
+}
+
+/**
+ * How a non-dissolve transition renders the incoming clip at overlap progress
+ * `p` (0 at the cut, 1 fully in): an alpha multiplier plus an optional edge
+ * slide, reveal clip, zoom, or a full-frame colour dip drawn over the outgoing
+ * clip. Pure geometry so it can be unit-tested.
+ */
+export interface TransitionTreatment {
+  alpha: number;
+  translate?: { x: number; y: number };
+  scale?: number;
+  clip?: { x: number; y: number; w: number; h: number };
+  overlay?: { color: string; alpha: number };
+}
+
+export function transitionTreatment(
+  type: TransitionType,
+  p: number,
+  outW: number,
+  outH: number,
+): TransitionTreatment {
+  // The dip fades the outgoing clip into a colour (alpha peaks at the midpoint)
+  // then the incoming clip fades up out of it.
+  const dip = 1 - Math.abs(2 * p - 1);
+  switch (type) {
+    case 'dipBlack':
+      return { alpha: Math.max(0, 2 * p - 1), overlay: { color: '#000', alpha: dip } };
+    case 'dipWhite':
+      return { alpha: Math.max(0, 2 * p - 1), overlay: { color: '#fff', alpha: dip } };
+    case 'slideLeft':
+      return { alpha: 1, translate: { x: (1 - p) * outW, y: 0 } };
+    case 'slideRight':
+      return { alpha: 1, translate: { x: -(1 - p) * outW, y: 0 } };
+    case 'slideUp':
+      return { alpha: 1, translate: { x: 0, y: (1 - p) * outH } };
+    case 'slideDown':
+      return { alpha: 1, translate: { x: 0, y: -(1 - p) * outH } };
+    case 'wipe':
+      return { alpha: 1, clip: { x: 0, y: 0, w: p * outW, h: outH } };
+    case 'zoom':
+      return { alpha: p, scale: 0.6 + 0.4 * p };
+    default:
+      return { alpha: p };
+  }
+}
+
+/**
+ * Draw a single clip, applying its entry transition over the overlap. Dissolve
+ * (and any clip past its overlap) takes the plain alpha-ramp path unchanged;
+ * other types wrap the draw with a slide/wipe/zoom/dip while the transition,
+ * not the crossfade ramp, drives the incoming clip's visibility. The outgoing
+ * clip is already on the canvas, so a dip's colour overlay covers it and a
+ * slide/wipe lets it show through. Shared by preview and export.
+ */
+export function drawClip(
+  ctx: Ctx2D,
+  clip: Clip,
+  outW: number,
+  outH: number,
+  timelineMs: number,
+  alphaMul: number,
+  xfadeInMs: number,
+  sample: DrawableFrame | null,
+): void {
+  const type = clip.transition ?? 'dissolve';
+  const p = xfadeInMs > 0 ? Math.max(0, Math.min(1, (timelineMs - clip.timelineStartMs) / xfadeInMs)) : 1;
+  if (type === 'dissolve' || xfadeInMs <= 0 || p >= 1) {
+    dispatchClipDraw(ctx, clip, outW, outH, timelineMs, alphaMul, xfadeInMs, sample);
+    return;
+  }
+
+  const treat = transitionTreatment(type, p, outW, outH);
+  ctx.save();
+  if (treat.overlay && treat.overlay.alpha > 0) {
+    ctx.globalAlpha = treat.overlay.alpha * alphaMul;
+    ctx.fillStyle = treat.overlay.color;
+    ctx.fillRect(0, 0, outW, outH);
+    ctx.globalAlpha = 1;
+  }
+  if (treat.translate) ctx.translate(treat.translate.x, treat.translate.y);
+  if (treat.scale && treat.scale !== 1) {
+    ctx.translate(outW / 2, outH / 2);
+    ctx.scale(treat.scale, treat.scale);
+    ctx.translate(-outW / 2, -outH / 2);
+  }
+  if (treat.clip) {
+    ctx.beginPath();
+    ctx.rect(treat.clip.x, treat.clip.y, treat.clip.w, treat.clip.h);
+    ctx.clip();
+  }
+  // The transition owns the incoming clip's visibility, so pass its alpha and
+  // disable the crossfade ramp (xfadeInMs = 0); the clip's own fades still apply.
+  dispatchClipDraw(ctx, clip, outW, outH, timelineMs, alphaMul * treat.alpha, 0, sample);
+  ctx.restore();
 }
